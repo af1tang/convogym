@@ -5,12 +5,14 @@ Created on Sat Dec 19 16:22:53 2020
 
 @author: af1tang
 """
-import torch, os, pickle, random, numpy as np
-import torch.nn as nn, torch.nn.functional as F
-from load_configs import *
-from utils import *
+import torch, torch.nn.functional as F
+from _tokenizer import tokenizer
+from _configs import action_space
+from utils._reshape import flatten
+from utils._device import to_var
+from utils._sampling import top_k_top_p_filtering
 
-#### Baseline UserSimulator ####
+#### Baseline Agent ####
 class Agent(object):
     def __init__(self, personas, reverse = False,
                  top_k=10, top_p = .92, max_length=1024):
@@ -24,8 +26,8 @@ class Agent(object):
             self.p1 = personas
         self.reset_convo()
         
-    def __call__(self, inp, state=None, context=None, reward=None, act=False):
-        return self.step(inp, act)
+    def __call__(self, model, inp, act=False):
+        return self.step(model, inp, act)
         
     def reset_convo(self):
         # reset dialog history
@@ -41,7 +43,15 @@ class Agent(object):
                 self.p1 = [action]
     
     def _reset_inp(self, act = False):
-        # action vs. persona code
+        """
+        Reformats the input to the agent. 
+        
+        Args: 
+            act: 
+                (boolean) Whether the input prefix is an action code (True)
+                            or a set of persona facts (False). 
+                            Default = False.
+        """
         if not act:
             if self.reversed:
                 self.inp = tokenizer.encode(''.join(['<|p1|>'] + self.p1 + ['<|sep|>'] + ['<|start|>']))
@@ -60,13 +70,24 @@ class Agent(object):
         if new_inp is not None:
             self.dialog_history.append(new_inp)
         
-    def step(self, inp, act=False):
+    def step(self, model, inp, act=False):
+        ''' Generates a response message based on input message.
+        Args: 
+            model: 
+                The decoder model e.g., a transformer decoder (GPT).
+            inp: 
+                The input message, does NOT include history of dialog.
+        Returns:
+            The output message as an array of integers, each corresponding to a token.
+        '''
         self._update_dialog_hx(inp)
         self._reset_inp(act)
         outp = []
+        model.eval()
         with torch.no_grad():
             while (tokenizer.eos_token_id not in outp) and (self.curr_len + len(outp) < self.max_length):
-                logits, self.past = model(self.inp, past=self.past)
+                outputs = model(self.inp, past_key_values=self.past)
+                logits, self.past = outputs.logits, outputs.past_key_values
                 # top k sampling          
                 log_scores = top_k_top_p_filtering(logits[:,-1,:], top_k=self.top_k, top_p=self.top_p)
                 probs = F.softmax(log_scores, dim=-1)
