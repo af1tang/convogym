@@ -11,7 +11,8 @@ from functools import partial
 
 import torch, torch.nn as nn, torch.nn.functional as F
 from torch.utils.data import DataLoader
-from transformers import AdamW, get_linear_schedule_with_warmup
+from torch.optim import AdamW
+from transformers import get_linear_schedule_with_warmup
 
 from utils._swa_utils import AveragedModel
 from utils._device import to_data, to_var, to_device
