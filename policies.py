@@ -59,7 +59,7 @@ class Policy(nn.Module):
             state_dict = torch.load(load_path)
             self.policy.load_state_dict(state_dict)
         except Exception as e:
-            print(e)
+            raise e
     
     def save(self, save_path):
         torch.save(self.policy.state_dict(), save_path)

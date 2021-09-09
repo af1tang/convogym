@@ -43,6 +43,60 @@ def _df_to_array(tokenizer, data_path):
             te_data.append( [x,p1,p2] )
     return tr_data, te_data
 
+def _filter_personas(personas, uniques = None):
+    '''
+    filters out redundant profiles from a list of personas.
+    input: 
+        personas: 
+            list of persona profiles, each profile consists of 3-5 list of strings
+    outputs:
+        uniques: 
+            set of unique persona profiles
+        filtered:
+            original list of personas, with each profile replaced by 
+            filtered personas. 
+            
+    example: 
+        >>> personas = [['i like wine', 'i have 5 kids'], 
+                        ['i hate wine', 'i like ice cream'],
+                        ['i like wine', 'i've 5 kids]] 
+        >>> uniques, filtered = _filtered_personas) 
+        >>> print(filtered)
+        
+        [[['i like wine', 'i have 5 kids'], 
+          ['i hate wine', 'i like ice cream'], 
+          ['i like wine', 'i have 5 kids']]
+    '''
+    if not uniques: 
+        uniques = []
+    filtered = []
+    
+    for p in tqdm(personas, total=len(personas)):
+        done, found = False, None
+        i = 0
+        while (not done) and len(uniques) > 0:
+            p_cand_facts = set(uniques[i])
+            num_overlap = sum([1 for fact in p if fact in p_cand_facts])
+            if num_overlap > 1:
+                done = True
+                found = uniques[i]
+            elif i+1 == len(uniques):
+                done = True
+            else:
+                i += 1
+        if found:
+            filtered.append(found)
+        else:
+            uniques.append(p)
+            filtered.append(p)
+    print()
+    print("%d unique persona profiles, %d unique persona facts found" %(len(uniques), 
+                                                len(set(flatten(uniques)))
+                                                                        )
+          )
+        
+    return uniques, filtered
+
 def _build_identifier_dataset(model, tokenizer, data):
     '''
     formats personachat dataframe into an array of samples.
@@ -81,7 +135,7 @@ def _build_identifier_dataset(model, tokenizer, data):
         x2 = [to_data(model(to_var(flatten(xx)).long(), 
                  output_hidden_states=True)[2][24].squeeze(0).mean(0)) for xx in x2]
     return list(zip(x1,x2, p1,p2))
-    
+
 
 def prepare_persona_dataset(model, tokenizer, data_path):
     '''
@@ -114,6 +168,31 @@ def prepare_persona_dataset(model, tokenizer, data_path):
     print("*"*50)
     print("Extracting data from personachat dataframe...")
     tr_data, te_data = _df_to_array(tokenizer, data_path)
+    # build p2v
+    x_tr, tr_p1, tr_p2 = list(zip(*tr_data))
+    x_te, te_p1, te_p2 = list(zip(*te_data))
+    # filter out redundant personas
+    tr_uniques, tr_p1_filtered = _filter_personas(tr_p1)
+    tr_uniques, tr_p2_filtered = _filter_personas(tr_p2, tr_uniques)
+    te_uniques, te_p1_filtered = _filter_personas(te_p1)
+    te_uniques, te_p2_filtered = _filter_personas(te_p2, te_uniques)
+    persona_facts = list(set(flatten(tr_uniques + te_uniques)))
+    # remake datasets w/ filtered personas 
+    tr_data = list(zip(x_tr, tr_p1_filtered, tr_p2_filtered))
+    te_data = list(zip(x_te, te_p1_filtered, te_p2_filtered))
+    model.eval()
+    print("Making persona dictionary ... ")
+    vectors = []
+    with torch.no_grad():
+        for line in tqdm(persona_facts):     
+            outp = model(**tokenizer(line, return_tensors='pt').to(device), output_hidden_states=True)
+            vectors.append(outp[2][24].squeeze(0).mean(0))
+        vectors = torch.stack(vectors)
+    # save p2v to local dir
+    p2v = dict([ (persona_facts[_], to_data(vectors[_])) for _ in range(len(persona_facts))])
+    with open(os.path.join(opts.example_path, 'p2v'), 'wb') as f:
+        pickle.dump(p2v, f)
+        
     # build identifier datasets     
     print()
     print("Preparing identifier training set ... ")
@@ -129,25 +208,5 @@ def prepare_persona_dataset(model, tokenizer, data_path):
         pickle.dump(vec_train_data, f)
     with open(os.path.join(opts.example_path, 'vec_test_data'), 'wb') as f:
         pickle.dump(vec_test_data, f)
-    
-    # build p2v
-    _, tr_p1, tr_p2 = list(zip(*tr_data))
-    _, te_p1, te_p2 = list(zip(*te_data))
-    tr_personas = [pp for pp in tr_p1] + [pp for pp in tr_p2]
-    te_personas = [pp for pp in te_p1] + [pp for pp in te_p2]
-    persona_facts = list(set(flatten(tr_personas + te_personas)))
-    model.eval()
-    print("Making persona dictionary ... ")
-    vectors = []
-    with torch.no_grad():
-        for line in tqdm(persona_facts):     
-            outp = model(**tokenizer(line, return_tensors='pt').to(device), output_hidden_states=True)
-            vectors.append(outp[2][24].squeeze(0).mean(0))
-            #if (i+1)%100 == 0:
-            #    print("[ processed: %d | total personas: %d ]" %(i+1, len(persona_facts)))
-        vectors = torch.stack(vectors)
-    
-    p2v = dict([ (persona_facts[_], to_data(vectors[_])) for _ in range(len(persona_facts))])
-    with open(os.path.join(opts.example_path, 'p2v'), 'wb') as f:
-        pickle.dump(p2v, f)
+
     return p2v, vec_train_data, vec_test_data

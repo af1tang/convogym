@@ -7,3 +7,6 @@ Created on Tue Mar 17 00:45:46 2020
 """
 
 
+__version__ = "0.1.0"
+__author__ = "Fengyi (Andy) Tang"
+
