@@ -32,3 +32,6 @@ p1_tok, p2_tok, start_tok = tokenizer.encode('<|p1|>')[0], tokenizer.encode('<|p
 
 # action token
 act_tok = tokenizer.encode('<|act|>')[0]
+
+# eos token
+eos_tok = tokenizer.eos_token

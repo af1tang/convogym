@@ -14,22 +14,24 @@ from utils._reshape import flatten
 from utils._device import to_var, to_data, device
 
 def _df_to_array(tokenizer, data_path):
-    '''
+    """
     converts dataframe -> array of [tokens, p1, p2] 
-    input: 
-        data_path: 
-            path to pandas dataframe of history (hx), personas (p1 and p2), 
+    
+    Parameters
+    -------
+    data_path : String or os.path
+        path to pandas dataframe of history (hx), personas (p1 and p2), 
             and split (train or test) as columns
-    output:
-        tr_data: 
-            list of rows in df, where hx is represented as token_ids, 
-            p1 and p2 are list of strings. 
+    Results
+    -------
+    tr_data : List of tuples
+        - list of rows in df, where hx is represented as token_ids, 
+        - p1 and p2 are list of strings. 
+        - selected rows where split == train.
             
-            rows where split == train.
-            
-        te_data:
-            rows where split != train
-    '''
+    te_data: List of tuples
+        - selected rows where split != train
+    """
     df = pd.read_csv(data_path)
     tr_data, te_data = [], []
     for i, row in tqdm(df.iterrows(), total=len(df)):
@@ -44,29 +46,37 @@ def _df_to_array(tokenizer, data_path):
     return tr_data, te_data
 
 def _filter_personas(personas, uniques = None):
-    '''
+    """
     filters out redundant profiles from a list of personas.
-    input: 
-        personas: 
-            list of persona profiles, each profile consists of 3-5 list of strings
-    outputs:
-        uniques: 
-            set of unique persona profiles
-        filtered:
-            original list of personas, with each profile replaced by 
-            filtered personas. 
-            
-    example: 
-        >>> personas = [['i like wine', 'i have 5 kids'], 
+
+    Parameters
+    ----------
+    personas : List of list of string
+        List of persona profiles, each profile consists of 3-5 list of strings.
+        
+    uniques : List of string, optional
+        Set of unique persona profiles. The default is None.
+
+    Returns
+    -------
+    uniques : List of string, optional
+        Set of unique persona profiles. The default is None..
+        
+    filtered : List of list of string, optional
+        original list of personas, with each profile replaced by filtered personas.
+
+    Examples
+    -------
+    >>> personas = [['i like wine', 'i have 5 kids'], 
                         ['i hate wine', 'i like ice cream'],
                         ['i like wine', 'i've 5 kids]] 
-        >>> uniques, filtered = _filtered_personas) 
-        >>> print(filtered)
-        
-        [[['i like wine', 'i have 5 kids'], 
-          ['i hate wine', 'i like ice cream'], 
-          ['i like wine', 'i have 5 kids']]
-    '''
+    >>> uniques, filtered = _filtered_personas) 
+    >>> print(filtered)
+    [[['i like wine', 'i have 5 kids'], 
+      ['i hate wine', 'i like ice cream'], 
+      ['i like wine', 'i have 5 kids']]
+     
+    """
     if not uniques: 
         uniques = []
     filtered = []
@@ -97,78 +107,193 @@ def _filter_personas(personas, uniques = None):
         
     return uniques, filtered
 
-def _build_identifier_dataset(model, tokenizer, data):
-    '''
-    formats personachat dataframe into an array of samples.
-    
-    inputs:
-        model: 
-            transformer model (BERT, GPT, etc.) that embeds the tokens 
-            corresponding to the relevant turns in the dialog history. 
-            (default = personaGPT)
-            
-        tokenizer:
-            associated tokenizer for the transformer. 
-            (default = personaGPT)
-            
-        data_path: 
-            file path for personachat data
-            
-    outputs:
-        array of samples, each sample consists of a tuple,
-            x1: 
-                token embedding inputs for person 1 responses during dialog
-            x2: 
-                token embedding inputs for person 2 responses during dialog
-            p1: 
-                list of strings of person 1 personas
-            p2: 
-                list of strings of person 2 personas
-    '''
-    model.eval()    
-    with torch.no_grad():
-        x,p1,p2 = list(zip(*data))
-        x1 = [[tokenizer.encode(xxx) for xxx in xx[::2]] for xx in x]
-        x2 = [[tokenizer.encode(xxx) for xxx in xx[1::2]] for xx in x]
-        x1 = [to_data(model(to_var(flatten(xx)).long(), 
-                 output_hidden_states=True)[2][24].squeeze(0).mean(0)) for xx in x1]
-        x2 = [to_data(model(to_var(flatten(xx)).long(), 
-                 output_hidden_states=True)[2][24].squeeze(0).mean(0)) for xx in x2]
-    return list(zip(x1,x2, p1,p2))
+def _build_persona_batches(model, tokenizer, data):
+    """
+    Formats (dialog history, person 1 facts, person 2 facts) into turn-level batches for training.
 
+    Parameters
+    ----------
+    model : A transformer decoder model e.g., GP2LMHeadModel 
+        Transformer model (BERT, GPT, etc.) that embeds the tokens corresponding to the relevant turns in the dialog history. 
+        (default = af1tang/personaGPT).
+        
+    tokenizer : A transformer tokenizer e.g., GPT2Tokenizer
+        Associated tokenizer for the transformer. 
+        (default = af1tang/personaGPT)        
+        
+    data : List of tuples
+        List of training batches in (tokens, persona 1, persona 2) format, where persona 1 and persona 2 are list of strings.
 
-def prepare_persona_dataset(model, tokenizer, data_path):
-    '''
-    hash map of persona facts -> vector embeddings of persona facts
+    Returns
+    -------
+    result : List of tuples
+        Each sample is a (x,y) pair:
+            - x: token IDs of persona facts + dialog history up to current turn
+            - y: token IDs of response at current turn.
+        
+        A dialog history of 8 turns (1 response from person 1 + 1 response from person 2 per turn) is broken up into 16 input output pairs. 
+        
+    Examples
+    -------
+    Suppose we have the following convo (a tuple) from PersonaChat:
+    >>> dialog_tokens = ["hi how is it going?", # pre-tokenized
+                         "not bad, how are you?",
+                         "i'm having fun on fifa, you?",
+                         "i'm tired from farming."]
+    >>> dialog_hx = [tokenizer.encode(line) for line in dialog_tokens]
+    >>> print(dialog_hx)
+    [[5303, 703, 318, 340, 1016, 30],
+     [1662, 2089, 11, 703, 389, 345, 30],
+     [72, 1101, 1719, 1257, 319, 5515, 64, 11, 345, 30],
+     [72, 1101, 10032, 422, 16035, 13]]
+    >>> p1 = ["i like to play video games.", 
+              "i want a cat someday."]
+    >>> p2 = ["i work on a large farm.",
+              "i don't have health insurance"]
     
-    inputs:
-        model: 
-            transformer model (BERT, GPT, etc.) that embeds tokens from facts. 
-            (default = personaGPT)
-            
-        tokenizer:
-            associated tokenizer for the transformer. 
-            (default = personaGPT)
-            
-        data_path: 
-            file path for personachat data
-            
-    outputs:
-        p2v: 
-            dictionary with unique persona facts as keys and 
-            embeddings of persona facts in R^n as values. (default n = 1024)
-            
-        vec_train_data:
-            training set of (x1, x2, p1, p2) samples to train identifier
-            
-        vec_test_data:
-            test set of (x1, x2, p1, p2) samples to test identifier
-    '''
+    This convo gets converted to the following input-output pairs (x,y):
+    >>> for i, (x,y) in enumerate(convo):
+    >>>     print('-'*10+'turn %d'%i + '-' *10)
+    >>>     print('input (x): ' , tokenizer.decode(x))
+    >>>     print('output (y): ', tokenizer.decode(y))
+    >>>     print()
+    ----------turn 0----------
+    input (x):  <|p1|> i like to play video games.i want a cat someday. <|sep|>
+    output (y):  <|start|> hi how is it going?
+    
+    ----------turn 1----------
+    input (x):  <|p2|> i work on a large farm.i don't have health insurance <|sep|> <|start|> hi how is it going?
+    output (y):  not bad, how are you?
+    
+    ----------turn 2----------
+    input (x):  <|p1|> i like to play video games.i want a cat someday. <|sep|> <|start|> hi how is it going?not bad, how are you?
+    output (y):  i'm having fun on fifa, you?
+    
+    ----------turn 3----------
+    input (x):  <|p2|> i work on a large farm.i don't have health insurance <|sep|> <|start|> hi how is it going?not bad, how are you?i'm having fun on fifa, you?
+    output (y):  i'm tired from farming.        
+    """
+    result = []
+    for (dialog_hx, p1, p2) in data:
+        dialog_hx = dialog_hx[:20] # limit by max len of convo
+        p1_ctx = tokenizer.encode(''.join(['<|p1|>'] + p1 + ['<|sep|>'] + ['<|start|>']))
+        p2_ctx = tokenizer.encode(''.join(['<|p2|>'] + p2 + ['<|sep|>'] + ['<|start|>']))
+        for t in range(len(dialog_hx)):
+            x = dialog_hx[:t]
+            y = dialog_hx[t]
+            if t == 0:
+                x = p1_ctx[:-1] 
+                y = [p1_ctx[-1]] + y
+            elif t %2 ==0:
+                x = p1_ctx + flatten(x)
+            else:
+                x = p2_ctx + flatten(x)
+            result.append((x,y))
+    return result
+
+def prepare_personachat_dataset(model, tokenizer, data_path):
+    """
+    Converts persona dataset into language model task format.
+
+    Parameters
+    ----------
+    model : A transformer decoder model e.g., GP2LMHeadModel 
+        Transformer model (BERT, GPT, etc.) that embeds the tokens corresponding to the relevant turns in the dialog history. 
+        (default = af1tang/personaGPT).
+        
+    tokenizer : A transformer tokenizer e.g., GPT2Tokenizer
+        Associated tokenizer for the transformer. 
+        (default = af1tang/personaGPT)   
+        
+    data_path : String or os.path
+        File path for personachat data.
+
+    Returns
+    -------
+    tr_batches : List of tuples
+        List of training set samples.
+        Each sample is a (x,y) pair:
+            - x: token IDs of persona facts + dialog history up to current turn
+            - y: token IDs of response at current turn.
+        
+        A dialog history of 8 turns (1 response from person 1 + 1 response from person 2 per turn) is broken up into 16 input output pairs. 
+    
+    te_batches : List of tuples
+        List of test set samples.
+        Each sample is a (x,y) pair:
+            - x: token IDs of persona facts + dialog history up to current turn
+            - y: token IDs of response at current turn.
+        
+        A dialog history of 8 turns (1 response from person 1 + 1 response from person 2 per turn) is broken up into 16 input output pairs. 
+    
+    """
     print()
     print("*"*50)
     print("Extracting data from personachat dataframe...")
     tr_data, te_data = _df_to_array(tokenizer, data_path)
-    # build p2v
+    # build training and testing batches
+    print("Building traing and testing batches from conversations...")
+    tr_batches = _build_persona_batches(model, tokenizer, tr_data)
+    te_batches = _build_persona_batches(model, tokenizer, te_data)
+    # saving
+    with open(os.path.join(opts.example_path, 'train_decoder_data'), 'wb') as f:
+        pickle.dump(tr_batches, f)
+    with open(os.path.join(opts.example_path, 'test_decoder_data'), 'wb') as f:
+        pickle.dump(te_batches, f)
+    print("done!")
+    print()
+    return tr_batches, te_batches
+
+def prepare_identifier_dataset(model, tokenizer, data_path):
+    """
+    Formats personachat dataframe into an array of training samples for unsupervised learning. 
+    
+    In unsupervised learning, embedding functions are learned for
+        - the dialog history
+        - the persona facts.
+        
+    Embeddings of the dialog history and persona facts can be used for state and context representations.
+
+
+    Parameters
+    ----------
+    model : A transformer decoder model e.g., GP2LMHeadModel 
+        Transformer model (BERT, GPT, etc.) that embeds the tokens corresponding to the relevant turns in the dialog history. 
+        (default = af1tang/personaGPT).
+        
+    tokenizer : A transformer tokenizer e.g., GPT2Tokenizer
+        Associated tokenizer for the transformer. 
+        (default = af1tang/personaGPT)   
+        
+    data_path : String or os.path
+        File path for personachat data.
+    
+    Saves
+    -------
+    tr_data : List of tuples
+        List of training set samples. 
+        Each sample is a tuple (dialog history, persona 1, persona 2):
+            - dialog history : list of token ids for each conversational turn
+            - persona 1 : list of strings of person 1 persona facts
+            - persona 2 : list of strings of person 2 persona facts.
+        
+    te_data : List of tuples
+        List of training set samples. 
+        Each sample is a tuple (dialog history, persona 1, persona 2):
+            - dialog history : list of token ids for each conversational turn
+            - persona 1 : list of strings of person 1 persona facts
+            - persona 2 : list of strings of person 2 persona facts.
+
+    Returns
+    -------
+    persona_facts : List of strings
+        List of unique persona facts in personachat.
+    """
+    print()
+    print("*"*50)
+    print("Extracting data from personachat dataframe...")
+    tr_data, te_data = _df_to_array(tokenizer, data_path)
+    # build filter personas to get unique persona facts
     x_tr, tr_p1, tr_p2 = list(zip(*tr_data))
     x_te, te_p1, te_p2 = list(zip(*te_data))
     # filter out redundant personas
@@ -180,33 +305,12 @@ def prepare_persona_dataset(model, tokenizer, data_path):
     # remake datasets w/ filtered personas 
     tr_data = list(zip(x_tr, tr_p1_filtered, tr_p2_filtered))
     te_data = list(zip(x_te, te_p1_filtered, te_p2_filtered))
-    model.eval()
-    print("Making persona dictionary ... ")
-    vectors = []
-    with torch.no_grad():
-        for line in tqdm(persona_facts):     
-            outp = model(**tokenizer(line, return_tensors='pt').to(device), output_hidden_states=True)
-            vectors.append(outp[2][24].squeeze(0).mean(0))
-        vectors = torch.stack(vectors)
-    # save p2v to local dir
-    p2v = dict([ (persona_facts[_], to_data(vectors[_])) for _ in range(len(persona_facts))])
-    with open(os.path.join(opts.example_path, 'p2v'), 'wb') as f:
-        pickle.dump(p2v, f)
-        
-    # build identifier datasets     
-    print()
-    print("Preparing identifier training set ... ")
-    vec_train_data = _build_identifier_dataset(model, tokenizer, tr_data)
-    print()
-    print("Preparing identifier test set ... ")
-    vec_test_data = _build_identifier_dataset(model, tokenizer, te_data)
-    print("Done.")
-    print('*'*50)
-    print()
-    # saving 
-    with open(os.path.join(opts.example_path, 'vec_train_data'), 'wb') as f:
-        pickle.dump(vec_train_data, f)
-    with open(os.path.join(opts.example_path, 'vec_test_data'), 'wb') as f:
-        pickle.dump(vec_test_data, f)
-
-    return p2v, vec_train_data, vec_test_data
+    # saving
+    df_facts = pd.DataFrame(persona_facts, columns=['Facts'])
+    df_facts.to_csv(os.path.join(opts.example_path, 'persona_facts.csv'), index=False)
+    with open(os.path.join(opts.example_path, 'train_state_estim_data'), 'wb') as f:
+        pickle.dump(tr_data, f)
+    with open(os.path.join(opts.example_path, 'test_state_estim_data'), 'wb') as f:
+        pickle.dump(te_data, f)
+    return persona_facts
+    

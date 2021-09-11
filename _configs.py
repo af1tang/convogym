@@ -24,6 +24,10 @@ weight_decay = os.getenv("weight_decay")
 logging_steps = os.getenv("logging_steps")
 save_steps = os.getenv("save_steps")
 num_cands = os.getenv("num_cands")
+# active learning params
+use_param_groups = os.getenv("use_param_groups")
+max_grad_norm = os.getenv("max_grad_norm")
+total_iters = os.getenv("total_iters") 
 # convo params
 num_personas = os.getenv("num_personas")
 
@@ -59,12 +63,15 @@ class Configs():
         self.logging_steps = int(logging_steps)
         self.bs = int(bs)
         self.num_cands = int(num_cands)
-        
+        # learning
+        self.gradient_accumulation_steps = int(gradient_accumulation_steps)
+        self.weight_decay = os.getenv("weight_decay")
+        # active learning params
+        self.use_param_groups = bool(use_param_groups)
+        self.max_grad_norm = float(max_grad_norm)
+        self.total_iters = int(total_iters)
+        self.scheduler_func = None
+        self.optim_func = None
 opts = Configs()
-
-action_space = [ 'ask about kids.', "ask about pets.", 'talk about work.', 
-           'ask about marital status.', 'talk about travel.', 'ask about age and gender.',
-    'ask about hobbies.', 'ask about favorite food.', 'talk about movies.', 
-    'talk about music.', 'talk about politics.']
 
 
