@@ -2,7 +2,10 @@
 
 ### A gym environment to train chatbots. 
 
-<img src="/figs/overview.png?raw=true" width=25% height=25% >
+<p align="center">
+<img src="/figs/overview.png?raw=true" width=50% height=50% >
+</p>
+
 
 ---
 
