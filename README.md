@@ -1,8 +1,9 @@
 # Convogym
 
-![Alt Text](/figs/overview.png?raw=true)
+### A gym environment to train chatbots. 
 
-Convogym is a 
+<img src="/figs/overview.png?raw=true" width=25% height=25% >
+
 ---
 
 ## Minimum Requirements
@@ -25,9 +26,6 @@ Convogym is a
 
 ---
 
-## Acknowledgements
-
----
 
 ## How to Cite 
 
