@@ -22,17 +22,17 @@ There are currently 3 different gym environments: `Gym` (base class), `ActiveGym
 ## Core Modules 
 There are 6 core modules in convogym. 
 
-* **Decoding** A module to do controlled text generation using language models. Currently supports [Huggingface](https://huggingface.co/models) transformers such as GPT-2, DialogGPT, etc. The default model is currently the `af1tang/personaGPT` [model card](https://huggingface.co/af1tang/personaGPT), which can handle personalities from the PersonaChat dataset.  
+* `decoders` A module to do controlled text generation using language models. Currently supports [Huggingface](https://huggingface.co/models) transformers such as GPT-2, DialogGPT, etc. The default model is currently the `af1tang/personaGPT` [model card](https://huggingface.co/af1tang/personaGPT), which can handle personalities from the PersonaChat dataset.  
 
-* **Agents** A module that handles response generation, formats tokens for natural language understanding (NLU) and controlled natural language generation (NLG). The base class is the `Agent` object, which handles formatting prefix tokens to do conditional text generation. 
+* `agents` A module that handles response generation, formats tokens for natural language understanding (NLU) and controlled natural language generation (NLG). The base class is the `Agent` object, which handles formatting prefix tokens to do conditional text generation. 
 
-* **State Estimation** A module to learn a representation of dialog histories. The base class is `StateEstimator` which takes dialog history (tokens) and map to an embedding space (a feature vector in `R^n`).  
+* `states` A module to learn a representation of dialog histories. The base class is `StateEstimator` which takes dialog history (tokens) and map to an embedding space (a feature vector in `R^n`).  
 
-* **Reward Functions** A module to train the state estimation and dialog policy. The base class is the `Reward` object, which provides a dialog-level object to guide conversations toward specific end points (dialog-level goals). 
+* `rewards` A module to train the state estimation and dialog policy. The base class is the `Reward` object, which provides a dialog-level object to guide conversations toward specific end points (dialog-level goals). 
 
-* **Dialog Policy** A module which learns to output _turn-level goals_ -- goals that decoder model can use to generate customized responses (e.g., personalized for the user, preserves sensibility of responses). The base class is the `Policy` object which interfaces with the training environment. A default `action_space` is provided which defines a preliminary set of turn-level goals (actions) for which a policy learns to work with. This can be overwritten for specific uses.
+* `policies` A module which learns to output _turn-level goals_ -- goals that decoder model can use to generate customized responses (e.g., personalized for the user, preserves sensibility of responses). The base class is the `Policy` object which interfaces with the training environment. A default `action_space` is provided which defines a preliminary set of turn-level goals (actions) for which a policy learns to work with. This can be overwritten for specific uses.
 
-* **Gyms** A module that ties together the core components (decoder, agents, state estimators, reward functions and policy) into an interactive interface from which dialog episodes can be simulated (`interactive=False`) or from which users can specify ground-truth responses for active learning (`interactive=False`). 
+* `gyms` A module that ties together the core components (decoder, agents, state estimators, reward functions and policy) into an interactive interface from which dialog episodes can be simulated (`interactive=False`) or from which users can specify ground-truth responses for active learning (`interactive=False`). 
 
 ## Dependencies
 
@@ -95,6 +95,7 @@ In this case, `get_custom_persona` prompts us to give our partner, the decoder m
 
 When we set `interactive=False`, conversations are simulated using self-play between 2 decoder models, parameterized by  different personalities which is displayed at the end of each episode. We can also access the dialog history and personalities directly through `gym.data`. 
 
+---
 
 #### Decoding w/ Turn-Level Goals
 
@@ -130,6 +131,8 @@ So how do we train the decoder to utilize _new_ turn-level goals? The answer is 
 
 In this setting, we are prompted to choose a goal from `new_goals` at each turn. The decoder `model` then tries output the correct response. When `train_model=True`, the decoder model is fine-tuned with gradient descent whenever we provide corrections. 
 
+---
+
 #### Dialog Policy
 
 Now suppose we want to train a model to output turn-level goals. We can use `RLGym` (Reinforcement Learning Gym) to interact with a policy model. 
@@ -152,6 +155,8 @@ Now suppose we want to train a model to output turn-level goals. We can use `RLG
 In `ManualReward`, the user provides a ground truth reward for each dialog trajectory. This assumes that the user already have a task-specific reward in mind. 
 
 Alternatively, users can also design dialog-level objective functions to train the policy (`training=True`). For example, the base class `Reward` uses a _ranking loss_ designed for the PersonaChat to identify relevant personalities used to parameterize the decoder model. 
+
+---
 
 #### Examples
 
