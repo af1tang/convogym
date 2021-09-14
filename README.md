@@ -68,7 +68,7 @@ As of September 2021, convogym is NOT supported on Apple Silicon M1 hardware.
 
 ## Getting Started
 
-### Interactive Dialog
+#### Interactive Dialog
 
 The decoder model can be interpreted as a straight forward language model that can generate a variety of stylized text. We can load the default decoder model as follows:
 
@@ -96,7 +96,7 @@ In this case, `get_custom_persona` prompts us to give our partner, the decoder m
 When we set `interactive=False`, conversations are simulated using self-play between 2 decoder models, parameterized by  different personalities which is displayed at the end of each episode. We can also access the dialog history and personalities directly through `gym.data`. 
 
 
-### Decoding w/ Turn-Level Goals
+#### Decoding w/ Turn-Level Goals
 
 Suppose we want to teach the decoder model to generate responses related to specific topics (e.g., talk about hobbies) rather than personalities. We can create the following _prefix tokens_ to describe these turn-level goals.
 
@@ -130,7 +130,7 @@ So how do we train the decoder to utilize _new_ turn-level goals? The answer is 
 
 In this setting, we are prompted to choose a goal from `new_goals` at each turn. The decoder `model` then tries output the correct response. When `train_model=True`, the decoder model is fine-tuned with gradient descent whenever we provide corrections. 
 
-### Dialog Policy
+#### Dialog Policy
 
 Now suppose we want to train a model to output turn-level goals. We can use `RLGym` (Reinforcement Learning Gym) to interact with a policy model. 
 
@@ -153,7 +153,7 @@ In `ManualReward`, the user provides a ground truth reward for each dialog traje
 
 Alternatively, users can also design dialog-level objective functions to train the policy (`training=True`). For example, the base class `Reward` uses a _ranking loss_ designed for the PersonaChat to identify relevant personalities used to parameterize the decoder model. 
 
-### Examples
+#### Examples
 
 Example scripts of various ways to use convogym can be found at `convogym/examples`. 
 
