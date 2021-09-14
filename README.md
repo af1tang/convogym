@@ -6,9 +6,21 @@
 
 ### A gym environment to train chatbots
 
-convogym is a Python library for simulating conversations between chatbots and for creating new training data between based on human-chatbot interactions. 
+convogym is a Python library for simulating conversations between chatbots and for creating new training data based on human-chatbot interactions. 
 
-There are 6 core modules in convogym: 
+
+## Gym Types
+
+There are currently 3 different gym environments: `Gym` (base class), `ActiveGym` (for active learning new turn-level goals), and `RLGym` (use reinforcement learning to guide turn-level goals toward dialog-level goals). 
+
+* The basic `Gym` environment is designed to interact with human users (`interactive=True`) or to simulate dialog episodes with randomly generated personality facts (`interactive=False`). Users can manually enter personality facts (`reset_persona_func=get_custom_persona`) to observe different effects on personalized dialog generation. 
+
+* In `ActiveGym`, human users teaches the decoder model to use new turn-level goals which are represented as contextual inputs to the decoder model. At each turn, the user chooses a turn-level goal for which the decoder tries to incorporate into its responses. If the response does not live up to user expectations, the user is prompted to enter a correct response for which to train the decoder model with. When `train_mode=True`, the decoder parameters are updated after each correction. 
+
+* In `RLGym`, human users no longer choose the turn-level goals, nor do they provide corrections to the responses. Instead, a dialog policy is trained to output a distribution over turn-level goals for which turn-level goals can be sampled from and used to guide the conversation. The default dialog-level objective function is a ranking loss used to detect relevant personality traits (from the PersonaChat dataset). 
+
+## Core Modules 
+There are 6 core modules in convogym. 
 
 * **Decoding** A module to do controlled text generation using language models. Currently supports [Huggingface](https://huggingface.co/models) transformers such as GPT-2, DialogGPT, etc. The default model is currently the `af1tang/personaGPT` [model card](https://huggingface.co/af1tang/personaGPT), which can handle personalities from the PersonaChat dataset.  
 
@@ -21,16 +33,6 @@ There are 6 core modules in convogym:
 * **Dialog Policy** A module which learns to output _turn-level goals_ -- goals that decoder model can use to generate customized responses (e.g., personalized for the user, preserves sensibility of responses). The base class is the `Policy` object which interfaces with the training environment. A default `action_space` is provided which defines a preliminary set of turn-level goals (actions) for which a policy learns to work with. This can be overwritten for specific uses.
 
 * **Gyms** A module that ties together the core components (decoder, agents, state estimators, reward functions and policy) into an interactive interface from which dialog episodes can be simulated (`interactive=False`) or from which users can specify ground-truth responses for active learning (`interactive=False`). 
-
-## Gym Types
-
-There are currently 3 different gym environments: `Gym` (base class), `ActiveGym` (for active learning new turn-level goals), and `RLGym` (use reinforcement learning to guide turn-level goals toward dialog-level goals). 
-
-* The basic `Gym` environment is designed to interact with human users (`interactive=True`) or to simulate dialog episodes with randomly generated personality facts (`interactive=False`). Users can manually enter personality facts (`reset_persona_func=get_custom_persona`) to observe different effects on personalized dialog generation. 
-
-* In `ActiveGym`, human users teaches the decoder model to use new turn-level goals which are represented as contextual inputs to the decoder model. At each turn, the user chooses a turn-level goal for which the decoder tries to incorporate into its responses. If the response does not live up to user expectations, the user is prompted to enter a correct response for which to train the decoder model with. When `train_mode=True`, the decoder parameters are updated after each correction. 
-
-* In `RLGym`, human users no longer choose the turn-level goals, nor do they provide corrections to the responses. Instead, a dialog policy is trained to output a distribution over turn-level goals for which turn-level goals can be sampled from and used to guide the conversation. The default dialog-level objective function is a ranking loss used to detect relevant personality traits (from the PersonaChat dataset). 
 
 ## Dependencies
 
@@ -86,10 +88,10 @@ We can initialize a gym environment to conduct a short conversation (3 rounds) w
 
 In this case, `get_custom_persona` prompts us to give our partner, the decoder model, a set of personality facts to go off of. Alternatively, we can use `reset_persona_func=get_random_persona` to sample from a list of personas provided in the `convogym/data` folder. 
 
-'''
+```
 >>> gym = Gym(model=model, tokenizer=tokenizer, interactive=False, reset_persona_func=get_random_persona, length=3)
 >>> gym.sim_convos(num_convos=3)
-'''
+```
 
 When we set `interactive=False`, conversations are simulated using self-play between 2 decoder models, parameterized by  different personalities which is displayed at the end of each episode. We can also access the dialog history and personalities directly through `gym.data`. 
 
@@ -172,8 +174,3 @@ A more detailed documentation page to come.
 ## How to Cite 
 
 Coming soon.
-
-
-## License 
-
-convogym is distributed under the GPL-3.0 License.
