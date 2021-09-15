@@ -140,17 +140,24 @@ Now suppose we want to train a model to output turn-level goals. We can use `RLG
 
 ```
 >>> from convogym.gyms import RLGym
+>>> # import modules for RL
 >>> from convogym.environments import Env
+>>> # base state estimator aggregates hidden state info of input tokens from decoder
 >>> from convogym.states import BaseStateEstimator
+>>> # manual reward gets user input to rate episode
 >>> from convogym.rewards import ManualReward
->>> from convogym.rewards import DQNPolicy
+>>> # DQN policy uses batch q learning to update policy
+>>> from convogym.policies import DQNPolicy
+>>> # define an action space for the policy (default is designed for personachat)
+>>> from convogym.load_data import default_action_space
 >>> state_estimator = BaseStateEstimator(model=model, tokenizer=tokenizer)
 >>> gym = RLGym( model=model, tokenizer=tokenizer, 
-				 policy=DQNPolicy(action_space=new_goals),
+				 policy=DQNPolicy(action_space=default_action_space),
 				 env=Env(state_estimator),
 				 reward_obj=ManualReward(state_estimator),
 		  )
->>> gym.sim_convos(training=True)
+>>> # simulate and rate 3 convos
+>>> gym.sim_convos(num_convos=3, training=True)
 ```
 
 In `ManualReward`, the user provides a ground truth reward for each dialog trajectory. This assumes that the user already have a task-specific reward in mind. 
