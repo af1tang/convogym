@@ -7,10 +7,9 @@ Created on Thu Aug 19 14:20:35 2021
 """
 import os
 import matplotlib.pyplot as plt
-from _configs import opts, create_dir
-from _tokenizer import tokenizer
+from convogym._configs import opts, create_dir
 
-def display_dialog_history(dialog_hx):
+def display_dialog_history(dialog_hx, tokenizer):
     for j, line in enumerate(dialog_hx):
         msg = tokenizer.decode(line)
         if j %2 == 0:
@@ -18,7 +17,10 @@ def display_dialog_history(dialog_hx):
         else:
             print("Bot: "+msg)
             print()
-            
+
+def to_tokens(dialog_history, tokenizer):
+    return [tokenizer.decode(line) for line in dialog_history]
+
 ### plotting ###    
 def plot_losses(stats, title='loss'):
     create_dir(opts.plot_path)

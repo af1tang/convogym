@@ -73,15 +73,14 @@ As of September 2021, convogym is NOT supported on Apple Silicon M1 hardware.
 The decoder model can be interpreted as a straight forward language model that can generate a variety of stylized text. We can load the default decoder model as follows:
 
 ```
->>> from convogym._decoder import model
->>> from convogym._tokenizer import tokenizer
+>>> from convogym.decoders import model, tokenizer
 ```
 
 We can initialize a gym environment to conduct a short conversation (3 rounds) with the decoder model as follows.
 
 ```
 >>> from convogym.gyms import Gym
->>> from convogym._personas import get_custom_persona, get_random_persona
+>>> from convogym.prefixes import get_custom_persona, get_random_persona
 >>> gym = Gym(model=model, tokenizer=tokenizer, interactive=True, reset_persona_func=get_custom_persona, length=3)
 >>> gym.sim_convos(num_convos=1)
 ```
@@ -102,9 +101,9 @@ When we set `interactive=False`, conversations are simulated using self-play bet
 Suppose we want to teach the decoder model to generate responses related to specific topics (e.g., talk about hobbies) rather than personalities. We can create the following _prefix tokens_ to describe these turn-level goals.
 
 ```
->>> from utils._device import to_var # use GPU
+>>> from convogym.utils._device import to_var # use GPU
 >>> goal = "ask about hobbies."
->>> inp = tokenier.encode("<|act|>" + goal + "<|p2><|sep|><|start|>") 
+>>> inp = tokenizer.encode("<|act|>" + goal + "<|p1|><|sep|><|start|>") 
 >>> print(inp)        
 [50262, 2093, 546, 45578, 13, 50257, 50260, 50257, 50259]        
 >>> tokenizer.decode(model.generate(to_var(inp).long().view(1,-1)).tolist()[0][len(inp):] )  
@@ -122,7 +121,9 @@ So how do we train the decoder to utilize _new_ turn-level goals? The answer is 
 
 ```
 >>> from convogym.gyms import ActiveGym
->>> from convogym.training_data import train_decoder_data
+>>> from convogym._configs import opts
+>>> from convogym.load_data import prepare_personachat_dataset
+>>> train_data, _ = prepare_personachat_dataset(model, tokenizer)
 >>> new_goals = ['talk about pokemon.', 'ask about favorite anime.']
 >>> gym = ActiveGym(model=model, tokenizer=tokenizer, action_space=new_goals,
 >>>								 training_data=train_decoder_data, train_model=True)
@@ -140,10 +141,10 @@ Now suppose we want to train a model to output turn-level goals. We can use `RLG
 ```
 >>> from convogym.gyms import RLGym
 >>> from convogym.environments import Env
->>> from convogym.states import StateEstimator
+>>> from convogym.states import BaseStateEstimator
 >>> from convogym.rewards import ManualReward
->>> from convogym.rewards import Policy
->>> state_estimator = StateEstimator(model=model, tokenizer=tokenizer, use_pretrained=True)
+>>> from convogym.rewards import DQNPolicy
+>>> state_estimator = BaseStateEstimator(model=model, tokenizer=tokenizer)
 >>> gym = RLGym( model=model, tokenizer=tokenizer, 
 				 policy=DQNPolicy(action_space=new_goals),
 				 env=Env(state_estimator),

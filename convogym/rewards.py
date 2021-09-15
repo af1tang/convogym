@@ -8,7 +8,8 @@ Created on Thu Aug 19 16:02:24 2021
 import random
 import numpy as np
 import torch, torch.nn as nn
-from _personas import persona_facts
+from convogym.utils._visualization import display_dialog_history
+from convogym.prefixes import load_persona_facts
 
 class RankingLoss(nn.Module):
     """
@@ -150,51 +151,112 @@ class Reward:
     """
     A helper object for callbacks that outputs turn-level rewards based on state information at each turn.
     
-    Also tracks various performance metrics during evaluation of a dialog policy.
+    In the base Reward, a custom criterion function is 
     
     Parameters
     -------
     state_estimator : StateEstimator object or Callable
         A state estimator model that maps from dialog history text -> embedding vector to represent state information.
     
-    criterion : Callable
-        Maps from state vector to a scalar reward. If None, initiates a RankingLoss object. The default is None.
+    criterion : nn.Module or Callable
+        Maps from state vector to a scalar reward. The default is None.
     
-    candidates : List of strings
-        List of possible persona facts to sample candidates from. Only used if RankingLoss is used for criterion.
+        If want (state, action) -> reward, simply concatenate action to state vector as input.
+
     """
-    def __init__(self, state_estimator, criterion=None, candidates=persona_facts):
-        if not criterion:
-            self.criterion = RankingLoss(state_estimator)
-        self.candidates = candidates
-        self.metrics = {'prec1s': [], 'prec5s': [],
-                        'rec5s': [], 'rec10s': [], 'rewards': []}
+    def __init__(self, state_estimator, criterion):
+        self.state_estimator = state_estimator
+        self.criterion = criterion
     
     def calculate_reward(self, scb, mcb):
         """
         Obtains reward from given persona and state information and passes it to the state callback.
     
-        Parameters
-        ----------
-        identifier : ID object (nn.Module or Callable)
-            Wrapper object for the Identifier neural network model:
-            - takes as input the averaged dialog history tokens 
-            - outputs an embedding (feature vector) in R^n.
-            Used to score trajectories based on persona inputs.
+        Attributes
+        -------
+        scb.reward : float
+            A scalar reward for current turn.
             
-        state : torch.Tensor
-            The feature vector embedding of the dialog history. Shape should be (1 x n) for a vector in R^n.
-            In Markov Decision Process terms, this is the state input to the policy. The default is None.
+        scb.rewards: List of floats
+            List of reward for each turn.
+    
+        """
+        loss = self.criterion(scb.state.view(1,-1))
+        scb.reward = - loss.item()
+        scb.rewards.append(scb.reward)
+        return scb, mcb
+    
+    def score_trajectory(self, scb, mcb):
+        """
+        Not implemented in base class.
+        """
+        raise NotImplementedError
+        
+class ManualReward(Reward):
+    """
+    Implements a wrapper on the Reward base object. 
+    
+    At each turn, the user is manually prompted to score the dialog up to the current turn. 
+    (state, action, next_state, reward) samples collected this way can be used to learn reward function that approximates user scoring (i.e., a criterion). 
+    """
+    def __init__(self, state_estimator, *args, **kwargs):
+        super().__init__(state_estimator=state_estimator, criterion=None)
+
+    def calculate_reward(self, scb, mcb):
+        """
+        Obtains reward from given persona and state information and passes it to the state callback.
+    
+        Attributes
+        -------
+        scb.reward : float
+            A scalar reward for current turn.
             
-        context : torch.Tensor
-            An auxiliary feature vector embedding of the dialog history. Shape should be (1 x n) for a vector in R^n.
-            This parameter is only relevant if a contextual policy is used. The default is None.
-            
-        personas : List of list strings
-            List of person 2 persona facts corresponding to each conversation in the batch.
-            
-        k : int, optional
-                Number of total candidates to use during negative sampling. The default is 20.
+        scb.rewards: List of floats
+            List of reward for each turn.
+    
+        """
+        reward = None
+        while reward is None:
+            display_dialog_history(mcb.dialog_hx, self.state_estimator.tokenizer)
+            try: 
+                reward = float(input( "Enter a reward (float) for current dialog: " ))
+            except:
+                reward = None
+        scb.reward = reward
+        scb.rewards.append(scb.reward)
+        return scb, mcb
+    
+    def score_trajectory(self, scb, mcb):
+        """
+        No additional metrics for this wrapper.
+        """
+        return scb, mcb
+
+class RankingReward(Reward):
+    """
+    Implements a wrapper on the Reward base object. 
+    
+    Calculates various precision@k and recall@k metrics based on the RankingLoss criterion.
+    
+    Parameters
+    -------
+    state_estimator : StateEstimator object or Callable
+        A state estimator model that maps from dialog history text -> embedding vector to represent state information.
+
+    path_to_persona_facts : os.path or string, optional
+        Path to list of persona facts. Used to generate candidates for ranking / scoring. 
+        If none, a list of persona facts is constructed from the PersonaChat data set and saved locally.
+        The default is none.
+    """
+    def __init__(self, state_estimator, path_to_persona_facts=None):
+        super().__init__(state_estimator, None)
+        self.criterion = RankingLoss(state_estimator)
+        self.candidates = load_persona_facts(path_to_persona_facts)
+        self.metrics = {'prec1s': [], 'prec5s': [],
+                        'rec5s': [], 'rec10s': [], 'rewards': []}
+    def calculate_reward(self, scb, mcb):
+        """
+        Obtains reward from given persona and state information and passes it to the state callback.
     
         Attributes
         -------
@@ -212,19 +274,6 @@ class Reward:
         scb.rewards.append(scb.reward)
         return scb, mcb
     
-    def score_trajectory(self, scb, mcb):
-        """
-        Not implemented in base class.
-        """
-        raise NotImplementedError
-
-class IR_Reward(Reward):
-    """
-    Implements a wrapper on the Reward base object. Calculates various precision@k and recall@k metrics based on the RankingLoss criterion.
-    """
-    def __init__(self, state_estimator, criterion=None, candidates=persona_facts):
-        super().__init__(state_estimator, None, candidates)
-
     def score_trajectory(self, scb, mcb):
         """
         Calculates precision@k and recall@k for current dialog trajectory.

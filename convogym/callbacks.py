@@ -17,9 +17,6 @@ class StateCb:
         The feature vector embedding of the dialog history. Shape should be (1 x n) for a vector in R^n.
         In Markov Decision Process terms, this is the state input to the policy. The default is None.
         
-    context : torch.Tensor, optional
-        An auxiliary feature vector embedding of the dialog history. Shape should be (1 x n) for a vector in R^n.
-        This parameter is only relevant if a contextual policy is used. The default is None.
         
     personas : List of strings, optional
         List of persona facts to track for scoring (if applicable). The default is None.
@@ -45,11 +42,11 @@ class StateCb:
         Tracks reward received at each turn.
 
     """
-    def __init__(self, state=None, context=None, personas = None,
+    def __init__(self, state=None, personas = None,
                  actions=None, reward=None, act=False):
 
-        self.state, self.context, self.action, self.reward, self.act = state, context, actions, reward, act
-        self.states, self.contexts, self.actions, self.rewards = [], [], [], []
+        self.state, self.action, self.reward, self.act = state, actions, reward, act
+        self.states, self.actions, self.rewards = [], [], []
         self.personas = personas
         self.turn, self.done = 0, False
 

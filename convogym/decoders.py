@@ -5,8 +5,26 @@ Created on Sat Aug 14 16:16:09 2021
 
 @author: af1tang
 """
-from transformers import GPT2Tokenizer
-from _configs import opts
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from convogym._configs import opts
+from convogym.utils._device import to_device
+
+try: 
+    print("*"*50)
+    print("Loading decoder from pretrained")
+    model = GPT2LMHeadModel.from_pretrained(opts.model_path)
+    print("*"*50)
+except Exception as e:
+    print(e)
+    print("*"*50)
+    print("Downloading decoder... ")
+    print("*"*50)
+    # download decoder
+    model = GPT2LMHeadModel.from_pretrained(opts.download_name)
+    # save locally
+    model.save_pretrained(opts.model_path)
+    
+model = to_device(model)
 
 try: 
     print("*"*50)
@@ -33,5 +51,3 @@ p1_tok, p2_tok, start_tok = tokenizer.encode('<|p1|>')[0], tokenizer.encode('<|p
 # action token
 act_tok = tokenizer.encode('<|act|>')[0]
 
-# eos token
-eos_tok = tokenizer.eos_token

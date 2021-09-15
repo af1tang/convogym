@@ -6,25 +6,21 @@ Created on Fri Aug 13 01:47:23 2021
 @author: af1tang
 """
 import os
-from environments import Env
-from policies import Verifier 
-from rewards import IR_Reward
-from gyms import Gym, ActiveGym, RLGym
-from states import RankingStateEstimator
+from convogym.environments import Env
+from convogym.policies import Verifier 
+from convogym.rewards import IR_Reward
+from convogym.gyms import Gym, ActiveGym, RLGym
+from convogym.decoders import model, tokenizer
+from convogym.states import BaseStateEstimator
 
-from _configs import opts
-from _decoder import model
-from _tokenizer import tokenizer
-from _personas import ( 
+from convogym._configs import opts
+from convogym.prefixes import ( 
                         train_personas, test_personas,
                         get_custom_persona, get_random_persona, 
                         get_sequence_personas
                         )            
+from convogym.load_data import prepare_personachat_dataset
 
-
-# TODO: saved / augment training data from various gym environments
-# TODO: make unit tests for 
-    
     
 # full interactive gym
 # gym = Gym(model, tokenizer, interactive=True, 
@@ -40,8 +36,11 @@ from _personas import (
 
 
 # active learning gym (collecting new episodes open)
-gym = ActiveGym(model = model, tokenizer = tokenizer, length = 4)
-
+train_data, _ = prepare_personachat_dataset(model, tokenizer)
+new_goals = ['talk about pokemon.', 'ask about favorite anime.']
+gym = ActiveGym(model=model, tokenizer=tokenizer, action_space=new_goals,
+								 training_data=train_data, train_model=True)
+gym.sim_convos(1)
 # active learning with fine tuning
 # from _prepare_persona_data import prepare_personachat_dataset
 # train_data, test_data = prepare_personachat_dataset(model, tokenizer, 

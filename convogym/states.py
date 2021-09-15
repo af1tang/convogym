@@ -10,14 +10,91 @@ import warnings
 import random
 import torch, torch.nn as nn
 import numpy as np
-from rewards import RankingLoss
-from utils._device import to_var, to_device, device
-from utils._reshape import chunker, flatten
-from utils._visualization import plot_losses
-from _configs import opts
+from convogym.rewards import RankingLoss
+from convogym.utils._device import to_var, to_device, device
+from convogym.utils._reshape import chunker, flatten
+from convogym.utils._visualization import plot_losses
+from convogym._configs import opts
 
 # embedding models
-class StateEstimator(nn.Module):
+class BaseStateEstimator(nn.Module):
+    """
+    Base state estimator. 
+    
+    Uses a transformer model and tokenizer to map dialog tokens to a single hidden state.
+    
+    Parameters
+    -------
+    model : A Huggingface transformer decoder model (default = GPT2LMHeadModel).
+        Currently supports Pytorch Huggingface (transformers) models only. 
+        The default model is af1tang/personaGPT model card.
+        
+    tokenizer : Huggingface transformer tokenizer (default = GPT2Tokenizer).
+        The corresponding tokenizer for the transformer model. 
+        The default tokenizer is af1tang/personaGPT.
+    
+    """
+    def __init__(self, model, tokenizer):
+        super(BaseStateEstimator, self).__init__()
+        self.model = model
+        self.tokenizer = tokenizer
+    
+    def _get_hidden_state(self, dialog_history, reduction = "mean"):
+        self.model.eval()   # fixes model to eval mode
+        with torch.no_grad():
+            hidden_states = self.model(to_var(flatten(dialog_history)).long(), 
+                         output_hidden_states=True)[2][24].squeeze(0)
+            if reduction == 'first':
+                x = hidden_states[0]
+            elif reduction == 'last':
+                x = hidden_states[-1]
+            else:
+                x = hidden_states.mean(0)
+        return x
+    
+    def forward(self, dialog_history, reduction = "mean"):
+        """
+        Converts a dialog history of a conversation into a single embedding vector in R^n.
+
+        Parameters
+        ----------
+        dialog_hx : List of list of ints
+            List of token ids, each corresponding to a dialog response.
+            
+        reduction : string, "mean", "first", "last" 
+            Different ways to take a representative hidden state. 
+            `mean` takes the average of the last hidden layer. 
+            `first` takes the first token hidden state of the last hidden layer (e.g., BERT uses CLS token to summarize text).
+            `last` takes the last token hidden state of the last hidden layer. 
+            The default is "mean".
+
+        Returns
+        -------
+        x : torch.Tensor
+            Outputs a hidden state for the entire dialog history.
+
+        """
+        return self._get_hidden_state(dialog_history, reduction)
+        
+    def load_params(self, *args, **kwargs):
+        """
+        Not Implemented in the base class.
+        """
+        raise NotImplementedError
+
+    def fit(self, *args, **kwargs):
+        """
+        Not Implemented in the base class.
+        """
+        raise NotImplementedError
+        
+    def evaluate(self, *args, **kwargs):
+        """
+        Not Implemented in the base class.
+        """
+        raise NotImplementedError
+    
+class StateEstimator(BaseStateEstimator):
     """
     Embedding neural network model that converts dialog history strings -> an embedding vector.
     
@@ -63,10 +140,7 @@ class StateEstimator(nn.Module):
     def __init__(self, model, tokenizer, 
                  checkpoint_path=os.path.join(opts.example_path, 'embedder.pt'),
                  inp_size=1024, hidden_size=1024, dropout=.2):
-        super(StateEstimator, self).__init__()
-        # decoder model and tokenizer
-        self.model = model
-        self.tokenizer = tokenizer
+        super().__init__(model=model, tokenizer=tokenizer)
         # network layers
         self.embedder = nn.Sequential( 
                 nn.Linear(inp_size, hidden_size),
@@ -77,7 +151,7 @@ class StateEstimator(nn.Module):
         self.checkpoint_path = checkpoint_path
         self.load_params(self.checkpoint_path)
         
-    def forward(self, dialog_history):
+    def forward(self, dialog_history, reduction = "mean"):
         """
         Converts a dialog history of a conversation into a single embedding vector in R^n.
 
@@ -85,22 +159,23 @@ class StateEstimator(nn.Module):
         ----------
         dialog_hx : List of list of ints
             List of token ids, each corresponding to a dialog response.
-
+            
+        reduction : string, "mean", "first", "last" 
+            Different ways to take a representative hidden state. 
+            `mean` takes the average of the last hidden layer. 
+            `first` takes the first token hidden state of the last hidden layer (e.g., BERT uses CLS token to summarize text).
+            `last` takes the last token hidden state of the last hidden layer. 
+            The default is "mean".
+            
         Returns
         -------
-        x : torch.Tensor
-            Outputs an embedding vector for the entire dialog history.
+        torch.Tensor
+            Outputs an embedding vector for the entire dialog history. Applies embedding network on hidden state of the dialog history.
 
         """
-        self.model.eval()   # fixes model to eval mode
-        with torch.no_grad():
-            inp_embedding = self.model(to_var(flatten(dialog_history)).long(), 
-                         output_hidden_states=True)[2][24].squeeze(0).mean(0)
-            inp_embedding = inp_embedding.unsqueeze(0)
-        x = self.embedder(inp_embedding)
-        return x
+        return self.embedder(self._get_hidden_state(dialog_history, reduction))
 
-    def _get_persona_embeddings(self, persona_facts):
+    def _get_persona_embeddings(self, persona_facts, reduction="mean"):
         """
         Converts a set of persona facts from string -> embedding vectors in R^n.
 
@@ -108,6 +183,13 @@ class StateEstimator(nn.Module):
         ----------
         persona_facts : List of strings
             List of persona facts in string form.
+
+        reduction : string, "mean", "first", "last" 
+            Different ways to take a representative hidden state. 
+            `mean` takes the average of the last hidden layer. 
+            `first` takes the first token hidden state of the last hidden layer (e.g., BERT uses CLS token to summarize text).
+            `last` takes the last token hidden state of the last hidden layer. 
+            The default is "mean".
 
         Returns
         -------
@@ -120,7 +202,13 @@ class StateEstimator(nn.Module):
         with torch.no_grad():
             for line in persona_facts:     
                 outp = self.model(**self.tokenizer(line, return_tensors='pt').to(device), output_hidden_states=True)
-                vectors.append(outp[2][24].squeeze(0).mean(0))
+                x = outp[2][24].squeeze(0)
+                if reduction=='first':
+                    vectors.append(x[0])
+                elif reduction=='last':
+                    vectors.append(x[-1])
+                else:
+                    vectors.append(x.mean(0))
             vectors = torch.stack(vectors)
         return vectors
     
@@ -137,18 +225,6 @@ class StateEstimator(nn.Module):
                           This state estimator model is NOT trained yet.
                           
                           ''')
-
-    def fit(self, *args, **kwargs):
-        """
-        Not Implemented in the base class.
-        """
-        raise NotImplementedError
-        
-    def evaluate(self, *args, **kwargs):
-        """
-        Not Implemented in the base class.
-        """
-        raise NotImplementedError
 
 class RankingStateEstimator(StateEstimator):
     """

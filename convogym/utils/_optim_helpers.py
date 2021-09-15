@@ -6,7 +6,7 @@ Created on Thu Sep  9 13:32:22 2021
 @author: af1tang
 """
 import torch
-from utils._device import device, to_var
+from convogym.utils._device import device, to_var
 
 def fit_on_batch(model, batch, gradient_accumulation_steps=8):
     """
@@ -38,10 +38,11 @@ def fit_on_batch(model, batch, gradient_accumulation_steps=8):
     try:
         xx, yy = torch.stack(xx, -1).to(device), torch.stack(yy, -1).to(device)
     except:
-        xx, yy = to_var(xx), to_var(yy)
+        xx, yy = to_var(xx).long(), to_var(yy).long()
     ## forward on new data batch
-    _, past = model(xx); del _
-    outp = model(yy, past=past, labels=yy)
+    _outp = model(xx)
+    past = _outp.past_key_values
+    outp = model(yy, past_key_values=past, labels=yy)
     
     # backward
     loss = outp[0]; del outp
@@ -81,22 +82,21 @@ def _process_dqn_batch(batch, policy, swa_policy, gamma):
 
     """
     try:
-        x, c, y, x_next, c_next, y_next, r = batch
+        x, y, x_next, y_next, r, dones = batch
         y_next = to_var(y_next)
 
     except:
-        x, c, y, x_next, c_next, r = batch
-    x,c = torch.stack(x, dim=-1).type(torch.cuda.FloatTensor), torch.stack(c, dim=-1).type(torch.cuda.FloatTensor)
-    x_next, c_next = torch.stack(x_next, dim=-1).type(torch.cuda.FloatTensor), torch.stack(c_next, dim=-1).type(torch.cuda.FloatTensor)
-    y, r = to_var(y), r.type(torch.cuda.FloatTensor)
-    xx = torch.cat((x,c), dim=-1)
-    xx_next = torch.cat((x_next, c_next), dim=-1)
+        x, y, x_next, y_next, r, dones = batch
+    xx = to_var(torch.stack(x, dim=-1).type(torch.FloatTensor))# torch.stack(c, dim=-1).type(torch.cuda.FloatTensor)
+    xx_next = to_var(torch.stack(x_next, dim=-1).type(torch.FloatTensor)) #torch.stack(c_next, dim=-1).type(torch.cuda.FloatTensor)
+    y, r, dones = to_var(y), to_var(r.type(torch.FloatTensor)), to_var(dones.long())
+    #xx = torch.cat((x,c), dim=-1)
+    #xx_next = torch.cat((x_next, c_next), dim=-1)
     # calculate q-values
     with torch.no_grad():
         # use target network to predict q-targets
         q_values = policy(xx_next)
         idx = q_values.max(1)[1]
         q_values = swa_policy(xx_next)
-        dones = (x[:,-1] >= 7).long()
         q_targets = r + (1-dones) * gamma * q_values[torch.arange(len(idx)), idx]
     return xx, y, q_targets

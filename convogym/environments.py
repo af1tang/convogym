@@ -6,7 +6,7 @@ Created on Thu Aug 19 16:00:29 2021
 @author: af1tang
 """
 import torch
-from utils._device import to_var
+from convogym.utils._device import to_var
 
 class Env:        
     """

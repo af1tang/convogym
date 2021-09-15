@@ -9,16 +9,183 @@ import os, pickle, ast
 import pandas as pd
 import torch
 from tqdm import tqdm
-from _configs import opts
-from utils._reshape import flatten
-from utils._device import to_var, to_data, device
+from convogym._configs import opts
+from convogym.utils._reshape import flatten
+from convogym.utils._device import to_var, to_data, device
+from convogym.utils._visualization import to_tokens
 
-def _df_to_array(tokenizer, data_path):
+default_action_space = ['ask about kids.',
+                         'ask about pets.',
+                         'talk about work.',
+                         'ask about marital status.',
+                         'talk about travel.',
+                         'ask about age and gender.',
+                         'ask about hobbies.',
+                         'ask about favorite food.',
+                         'talk about movies.',
+                         'talk about music.',
+                         'talk about politics.']
+
+# methods for loading saved datasets 
+def load_selfplay_convos(tokenizer, data_path):
+    """
+    Loads saved self-play convos into training data format.
+    
+    Parameters
+    -------
+    tokenizer : A transformer tokenizer e.g., GPT2Tokenizer
+        Associated tokenizer for the transformer. 
+        (default = af1tang/personaGPT)    
+        
+    data_path : String or os.path
+        path to pandas dataframe of history (hx) and personas (p1 and p2)
+        
+    Results
+    -------
+    data : List of tuples
+        - list of rows in df, where hx is represented as token_ids, 
+        - p1 and p2 are list of strings. 
+            
+    """
+    df = pd.read_csv(data_path)
+    data = []
+    for i, row in tqdm(df.iterrows(), total=len(df)):
+        convo, p1, p2 = row['hx'], row['p1'], row['p2']
+        convo, p1, p2 = ast.literal_eval(convo), ast.literal_eval(p1), ast.literal_eval(p2)
+
+        x = [tokenizer.encode(line) for line in convo]
+        data.append( [x, p1, p2] )
+    return data
+
+def load_active_learning_convos(tokenizer, data_path):
+    """
+    Loads saved active learning convos into training data format.
+
+    Parameters
+    ----------
+    tokenizer : A transformer tokenizer e.g., GPT2Tokenizer
+        Associated tokenizer for the transformer. 
+        (default = af1tang/personaGPT)    
+        
+    data_path : String or os.path
+        path to pandas dataframe of input context (X), response targets (y).
+            
+    Returns
+    -------
+    active_data : List of tuples
+        List of training batches of the form (X,y) 
+        where X is the prefix (turn-level goals + dialog history) 
+        and y is the response tokens to decode.
+
+    """
+    df = pd.read_csv(data_path)
+    X, y = df['X'].tolist(), df['y'].tolist()
+    # active learning data
+    active_data = list(zip(X,y))
+    return active_data
+
+def load_imitation_learning_convos(tokenizer, data_path):
+    """
+    Loads saved active learning convos into imitation learning format.
+
+    Parameters
+    ----------
+    tokenizer : A transformer tokenizer e.g., GPT2Tokenizer
+        Associated tokenizer for the transformer. 
+        (default = af1tang/personaGPT)    
+        
+    data_path : String or os.path
+        path to pandas dataframe of history (dialog_hx) and turn-level goals (actions).
+            
+    Returns
+    -------
+    imitation_data : List of tuples
+        List of training batches of the form (dialog_hx, actions) 
+        where dialog_hx is the tokens from which to extract state estimates,
+        actions is the output actions taken by the human user. 
+        
+        One can use this data for imitation learning or to pretrain the policy.
+
+    """
+    df = pd.read_csv(data_path)
+    dialog_history = df['dialog_hx'].tolist()
+    actions = df['actions'].tolist()
+    # imitation learning data
+    imitation_data = list(zip(dialog_history, actions))
+    return imitation_data
+
+def load_rl_convos(tokenizer, state_estimator, data_path):
+    """
+    Loads saved RL conversations from convogym into training data format.
+
+    Parameters
+    ----------
+    tokenizer : A transformer tokenizer e.g., GPT2Tokenizer
+        Associated tokenizer for the transformer. 
+        (default = af1tang/personaGPT)    
+        
+    state_estimator : StateEstimator object or Callable
+        A state estimator model that maps from dialog history text -> embedding vector to represent state information.
+        
+    data_path : String or os.path
+        path to pandas dataframe of input context (X), response targets (y), 
+            history (dialog_hx), and turn-level goals (actions).
+            
+    Returns
+    -------
+    active_data : List of tuples
+        List of training batches of the form (X,y) 
+        where X is the prefix (turn-level goals + dialog history) 
+        and y is the response tokens to decode.
+
+    Returns
+    -------
+    mdp_data : List of tuples
+        List of training batches of the form (dialog_hx, actions) 
+        where dialog_hx is the tokens from which to extract state estimates,
+        actions is the output actions taken by the human user. 
+
+    """
+    df = pd.read_csv(data_path)
+    hx, actions = df['dialog_hx'].tolist(), df['actions'].tolist()
+    rewards, personas = df['rewards'].tolist(), df['personas'].tolist()
+    data = []
+    print("building dataset ... ")
+    for i, (convo, ep_actions, ep_rewards) in tqdm(list(zip(hx, actions, rewards)), total=len(df)):
+        states, acts, rewards = [], [], [], []
+        for turn in range(0,len(convo),2):
+            curr_hx = convo[0:turn]
+            if len(curr_hx) == 0:
+                state = [0.0]*1025
+            else:
+                state = state_estimator(to_tokens(curr_hx[1::2], tokenizer)).tolist()
+                state.append(turn/2.0)
+                # get reward
+                rewards.append(ep_rewards[turn//2])
+            if turn // 2 < len(convo)/2:
+                a = ep_actions[turn //2 ]; acts.append(a)
+            states.append(state)
+
+        # batching
+        next_states = states[1:]; states = states[:-1]
+        next_acts = acts[1:] + [0]
+        batch = list(zip(states, acts, next_states, next_acts, rewards))
+        data.append(batch)
+
+    print("done.")
+    return data
+
+# methods for building PersonaChat dataset 
+def _load_personachat(tokenizer, data_path):
     """
     converts dataframe -> array of [tokens, p1, p2] 
     
     Parameters
     -------
+    tokenizer : A transformer tokenizer e.g., GPT2Tokenizer
+        Associated tokenizer for the transformer. 
+        (default = af1tang/personaGPT)    
+        
     data_path : String or os.path
         path to pandas dataframe of history (hx), personas (p1 and p2), 
             and split (train or test) as columns
@@ -35,7 +202,7 @@ def _df_to_array(tokenizer, data_path):
     df = pd.read_csv(data_path)
     tr_data, te_data = [], []
     for i, row in tqdm(df.iterrows(), total=len(df)):
-        convo, p1, p2,split = row['hx'], row['p1'], row['p2'], row['split']
+        convo, p1, p2, split = row['hx'], row['p1'], row['p2'], row['split']
         convo, p1, p2 = ast.literal_eval(convo), ast.literal_eval(p1), ast.literal_eval(p2)
 
         x = [tokenizer.encode(line) for line in convo]
@@ -45,7 +212,8 @@ def _df_to_array(tokenizer, data_path):
             te_data.append( [x,p1,p2] )
     return tr_data, te_data
 
-def _filter_personas(personas, uniques = None):
+
+def _filter_personas(personas, uniques=None):
     """
     filters out redundant profiles from a list of personas.
 
@@ -191,7 +359,8 @@ def _build_persona_batches(model, tokenizer, data):
             result.append((x,y))
     return result
 
-def prepare_personachat_dataset(model, tokenizer, data_path):
+def prepare_personachat_dataset(model, tokenizer, data_path=None,
+                                save_dir=opts.example_path):
     """
     Converts persona dataset into language model task format.
 
@@ -230,21 +399,24 @@ def prepare_personachat_dataset(model, tokenizer, data_path):
     print()
     print("*"*50)
     print("Extracting data from personachat dataframe...")
-    tr_data, te_data = _df_to_array(tokenizer, data_path)
+    if not data_path:
+        data_path = os.path.join(opts.data_path, 'personachat.csv')
+    tr_data, te_data = _load_personachat(tokenizer, data_path)
     # build training and testing batches
     print("Building traing and testing batches from conversations...")
     tr_batches = _build_persona_batches(model, tokenizer, tr_data)
     te_batches = _build_persona_batches(model, tokenizer, te_data)
     # saving
-    with open(os.path.join(opts.example_path, 'train_decoder_data'), 'wb') as f:
+    with open(os.path.join(save_dir, 'train_decoder_data'), 'wb') as f:
         pickle.dump(tr_batches, f)
-    with open(os.path.join(opts.example_path, 'test_decoder_data'), 'wb') as f:
+    with open(os.path.join(save_dir, 'test_decoder_data'), 'wb') as f:
         pickle.dump(te_batches, f)
     print("done!")
     print()
     return tr_batches, te_batches
 
-def prepare_identifier_dataset(model, tokenizer, data_path):
+def prepare_state_estim_dataset(model, tokenizer, data_path=None,
+                               save_dir=opts.example_path):
     """
     Formats personachat dataframe into an array of training samples for unsupervised learning. 
     
@@ -292,7 +464,9 @@ def prepare_identifier_dataset(model, tokenizer, data_path):
     print()
     print("*"*50)
     print("Extracting data from personachat dataframe...")
-    tr_data, te_data = _df_to_array(tokenizer, data_path)
+    if not data_path:
+        data_path = os.path.join(opts.data_path, 'personachat.csv')
+    tr_data, te_data = _load_personachat(tokenizer, data_path)
     # build filter personas to get unique persona facts
     x_tr, tr_p1, tr_p2 = list(zip(*tr_data))
     x_te, te_p1, te_p2 = list(zip(*te_data))
@@ -307,10 +481,10 @@ def prepare_identifier_dataset(model, tokenizer, data_path):
     te_data = list(zip(x_te, te_p1_filtered, te_p2_filtered))
     # saving
     df_facts = pd.DataFrame(persona_facts, columns=['Facts'])
-    df_facts.to_csv(os.path.join(opts.example_path, 'persona_facts.csv'), index=False)
-    with open(os.path.join(opts.example_path, 'train_state_estim_data'), 'wb') as f:
+    df_facts.to_csv(os.path.join(save_dir, 'persona_facts.csv'), index=False)
+    with open(os.path.join(save_dir, 'train_state_estim_data'), 'wb') as f:
         pickle.dump(tr_data, f)
-    with open(os.path.join(opts.example_path, 'test_state_estim_data'), 'wb') as f:
+    with open(os.path.join(save_dir, 'test_state_estim_data'), 'wb') as f:
         pickle.dump(te_data, f)
     return persona_facts
     

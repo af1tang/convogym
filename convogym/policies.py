@@ -12,12 +12,12 @@ import numpy as np
 import torch, torch.nn as nn, torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from _action_space import action_space
-from _configs import opts
-from utils._optim_helpers import _process_dqn_batch
-from utils._device import to_device
-from utils._swa_utils import AveragedModel
-from utils._visualization import plot_losses
+from convogym.load_data import default_action_space as action_space
+from convogym._configs import opts
+from convogym.utils._optim_helpers import _process_dqn_batch
+from convogym.utils._device import to_device
+from convogym.utils._swa_utils import AveragedModel
+from convogym.utils._visualization import plot_losses
 
 
 from torch.optim import AdamW
@@ -69,7 +69,7 @@ class Policy(nn.Module):
     -------
     >>> from convogym.policies import Policy # default policy
     >>> from convogym.utils._device import to_var
-    >>> import torch.nn as nn
+    >>> import torch, torch.nn as nn
     >>> action_space = [ 
         'talk about work.', 
         'ask about hobbies.',
@@ -91,7 +91,7 @@ class Policy(nn.Module):
     """    
     def __init__(self, policy=default_policy,
                  checkpoint_path=os.path.join(opts.example_path, 'policy.pt'),
-                 lr=1e-4, action_space = action_space,
+                 lr=1e-4, action_space=action_space,
                 EPS_START=.5, EPS_END=.05, EPS_DECAY=int(2e4)):
         super(Policy, self).__init__()
         self.policy = to_device(policy)
@@ -103,7 +103,7 @@ class Policy(nn.Module):
         self.action_space = action_space
         # load params, warn if not trained
         self.checkpoint_path = checkpoint_path
-        self.load_
+        self.load_params()
         
     def reset_stats(self):
         """
@@ -181,7 +181,6 @@ class Policy(nn.Module):
             warnings.warn(str(e) + '''
                           
                           This policy model is NOT trained yet.
-                          
                           ''')
                 
     def save(self):
@@ -191,11 +190,11 @@ class Policy(nn.Module):
         torch.save(self.policy.state_dict(), self.checkpoint_path)
 
 
-class Verifier(Policy):
+class DQNPolicy(Policy):
     """
     A wrapper policy object that inherits from the base Policy object.
     
-    Verifier object specifies a training loop for the policy network using the self.update_policy() method. 
+    DQNPolicy object specifies a training loop for the policy network using the self.update_policy() method. 
     
     New Attributes
     -------
@@ -211,7 +210,7 @@ class Verifier(Policy):
     """
     def __init__(self, policy=default_policy,
                  checkpoint_path=os.path.join(opts.example_path, 'policy.pt'),
-                 lr=1e-4, action_space = action_space,
+                 lr=1e-4, action_space = action_space, gamma=.95,
                 EPS_START=.5, EPS_END=.05, EPS_DECAY=int(2e4), t_total=int(2e4)):
         super().__init__(policy=policy, checkpoint_path=checkpoint_path,
                          lr=lr, action_space=action_space, 
@@ -220,6 +219,7 @@ class Verifier(Policy):
         self.optimizer = AdamW(self.policy.parameters(), lr=lr)
         self.scheduler = get_linear_schedule_with_warmup(self.optimizer, num_warmup_steps=0, 
                                                 num_training_steps=t_total)
+        self.gamma = gamma
         # swa tools
         ema_avg = lambda averaged_model_parameter, model_parameter, num_averaged:\
                 0.99 * averaged_model_parameter + 0.01 * model_parameter

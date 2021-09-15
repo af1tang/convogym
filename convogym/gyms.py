@@ -5,21 +5,20 @@ Created on Wed Aug 11 20:25:09 2021
 
 @author: af1tang
 """
-import torch, random
-from _configs import opts
-from _action_space import action_space
-from _tokenizer import start_tok
-from _personas import ( train_personas, test_personas,
+import os
+import torch, random, pandas as pd
+from convogym._configs import opts
+from convogym.load_data import default_action_space as action_space
+from convogym.prefixes import ( train_personas, test_personas,
                         get_custom_persona, get_random_persona, 
                         get_sequence_personas
                         )
-from utils._visualization import display_dialog_history 
-from utils._reshape import flatten 
-from utils._turn_filter import to_tokens
+from convogym.utils._visualization import display_dialog_history, to_tokens
+from convogym.utils._reshape import flatten 
 
-from learners import Learner
-from agents import Agent
-from callbacks import StateCb, MessageCb
+from convogym.learners import Learner
+from convogym.agents import Agent
+from convogym.callbacks import StateCb, MessageCb
 
 
 ## gym environments ##
@@ -132,11 +131,13 @@ class Gym:
 
         """
         if persona_input:
-            self.agent = Agent(persona_input, top_k=self.top_k,
+            self.agent = Agent(model=self.model, tokenizer=self.tokenizer, 
+                               persona=persona_input, top_k=self.top_k,
                                top_p=self.top_p, max_length=self.max_length)
         else:
-            persona = self.reset_persona_func(agent_personas)
-            self.agent = Agent(persona, reverse=False, top_k=self.top_k, 
+            persona = self.reset_persona_func(persona_list=user_personas)
+            self.agent = Agent(model=self.model, tokenizer=self.tokenizer, 
+                               persona=persona, reverse=False, top_k=self.top_k, 
                               top_p=self.top_p, max_length=self.max_length)
             
         if self.interactive:
@@ -144,11 +145,12 @@ class Gym:
             self.user = self._interact
         else:
             # another persona model
-            persona = self.reset_persona_func(user_personas)
-            self.user = Agent(persona, reverse=True, top_k=self.top_k, 
+            persona = self.reset_persona_func(persona_list=user_personas)
+            self.user = Agent(model=self.model, tokenizer=self.tokenizer, 
+                              persona=persona, reverse=True, top_k=self.top_k, 
                               top_p=self.top_p, max_length=self.max_length)
         
-    def _interact(self, model, msg, act):
+    def _interact(self, msg, act):
         """
         Get user input for response. Only used when self.interactive=True.
 
@@ -337,8 +339,8 @@ class Gym:
         for p in scb.personas: print(p)
         print('-'*10)
         print()
-        display_dialog_history(mcb.dialog_hx)
-        self.data['hx'].append(to_tokens( mcb.dialog_hx ))
+        display_dialog_history(mcb.dialog_hx, self.tokenizer)
+        self.data['hx'].append(to_tokens( mcb.dialog_hx, self.tokenizer ))
         if self.interactive:
             self.data['p1'].append([])
         else:
@@ -377,11 +379,11 @@ class Gym:
         while not scb.done:
             # person 1 (user) 
             scb,mcb = self._on_user_begin(scb,mcb)             
-            mcb.msg = self.user(self.model, mcb.msg, act=scb.act)
+            mcb.msg = self.user(mcb.msg, act=scb.act)
             scb,mcb = self._on_user_end(scb,mcb)
 
             # person 2 (agent)
-            mcb.msg = self.agent(self.model, mcb.msg, act=scb.act)
+            mcb.msg = self.agent(mcb.msg, act=scb.act)
             scb, mcb = self._on_agent_end(scb,mcb)
         self._on_convo_end(scb, mcb) 
     
@@ -411,14 +413,22 @@ class Gym:
         for i in range(num_convos):
             self._sim_convo(None, agent_personas, user_personas)
  
-    def run_evaluation(self):
+    def save_data(self, save_path):
         """
-        Not implemented in base Gym object. 
+        Save conversational episode data to file.
+
+        Parameters
+        ----------
+        save_path : os.path or string
+            Path to save self.data to. Saves as a .csv file. 
+
+        Returns
+        -------
+        None.
         
-        Used in RLGym to evaluate trained agent policies.
         """
-        raise NotImplementedError("evaluation loop not implemented for current environment.")
-    
+        df = pd.DataFrame(self.data)
+        df.to_csv(save_path, index=False)
         
 # active learning environments
 class ActiveGym(Gym):
@@ -443,10 +453,9 @@ class ActiveGym(Gym):
         
     training_data : torch.utils.data.Dataset or List of tuples , optional
         List of training batches to sample batches from. Used to re-fit model to prevent catastrophic forgetting.
-                
-    user : Agent object, optional
-        In ActiveGym, the user is set to an Agent object without any persona facts. 
-        At each turn, the user provides an action (turn-level goal) to train the model with.
+
+    action_space : List of strings
+        List of turn-level goals to train the decoder with using active learning.
         
     length : int, optional
         Length of a given conversation. 
@@ -467,6 +476,29 @@ class ActiveGym(Gym):
     train_model : bool, optional
         Whether to fine-tune the model during active learning episodes. If False, the model is not fine-tuned between corrections.
         (default = True)
+        
+    lr : float, optional
+        Learning rate for model parameters. The default is 5e-5.
+        
+    use_param_groups : bool, optional
+        Whether to use different learn rates for special tokens, positional tokens and normal tokens.
+        The default is True.
+        
+    schedule_func : torch.optim.lr_scheduler object, optional
+        Learn rate scheduler function. The default is get_linear_schedule_with_warmup.
+        
+    gradient_accumulation_steps : int, optional
+        Number of gradient accumulation steps. The default is 8.
+        
+    max_grad_norm : float, optional
+        Max gradient norm size for gradient clipping. The default is 1.0.
+        
+    optim_func : torch.optim object, optional
+        Optimizer used to update parameters. The default is AdamW.
+        
+    total_iters : int, optional
+        Max number of training iters. The default is 20000.
+
 
     Attributes
     -------
@@ -474,7 +506,7 @@ class ActiveGym(Gym):
         Active learning data in dictionary format: 
             - X: List of list of int
                 Input tokens (encoded by tokenizer) of action prefix + dialog history.
-            - Y: List of list of int
+            - y: List of list of int
                 Human-provided response (ground truth).
             - dialog_hx: List of string
                 List of responses at each turn.
@@ -485,24 +517,30 @@ class ActiveGym(Gym):
         Training wrapper to update the decoder model (self.model) on active learning data.
 
     """
-    def __init__(self, model, tokenizer, training_data=None,
-                 user=None, length=8, top_k=10, top_p = .92,
-                 max_length=1024, train_model = False):
+    def __init__(self, model, tokenizer, training_data=None, 
+                 train_model=False, action_space=action_space,
+                 length=8, top_k=10, top_p = .92, max_length=1024, 
+                 # learner wrapper parameters
+                 use_param_groups=False, lr=opts.lr,
+                 schedule_func=None, gradient_accumulation_steps=8, 
+                 optim_func=None, total_iters=20000, max_grad_norm=1.0):
         
         super().__init__(model=model, tokenizer=tokenizer, user=None, interactive=True, 
                          reset_persona_func=get_sequence_personas,
                          length=length, top_k=top_k, top_p=top_p, max_length=max_length)
         self.train_model = train_model
+        self.action_space = action_space
         if train_model:
-            raise ValueError("training_set cannot be None while train_model = True.")
+            if not training_data:
+                raise ValueError("training_set cannot be None while train_model = True.")
             self.learner = Learner(model = model, training_data = training_data, 
-                                   lr = opts.lr, 
-                                   use_param_groups = opts.use_param_groups,
-                                   schedule_func=opts.schedule_func,
-                                   gradient_accumulation_steps=opts.gradient_accumulation_steps,
-                                   max_grad_norm=opts.max_grad_norm,
-                                   optim_func=opts.optim_func,
-                                   total_iters=opts.total_iters)
+                                   lr = lr, 
+                                   use_param_groups = use_param_groups,
+                                   schedule_func=schedule_func,
+                                   gradient_accumulation_steps=gradient_accumulation_steps,
+                                   max_grad_norm=max_grad_norm,
+                                   optim_func=optim_func,
+                                   total_iters=total_iters)
             
         self.data = {'X': [], 'y': [], 'dialog_hx': [], 'actions': []}
     
@@ -513,8 +551,10 @@ class ActiveGym(Gym):
             - At the end of each conversation, a new persona profile (3-5 persona facts) is sampled from a list of training personas.
             
         """
-        self.user = Agent([], top_k=self.top_k, top_p=self.top_p, max_length=self.max_length)
-        self.agent = Agent(persona_input, top_k=self.top_k,
+        self.user = Agent(model=self.model, tokenizer=self.tokenizer, 
+                          persona=[], top_k=self.top_k, top_p=self.top_p, max_length=self.max_length)
+        self.agent = Agent(model=self.model, tokenizer=self.tokenizer, 
+                            persona=persona_input, top_k=self.top_k,
                                top_p=self.top_p, max_length=self.max_length)
         
     def _on_convo_begin(self, scb, mcb):
@@ -546,14 +586,14 @@ class ActiveGym(Gym):
         if mcb.msg is not None:
             mcb.dialog_hx.append(mcb.msg)
         action = None
-        while action not in action_space:
-            display_dialog_history(mcb.dialog_hx)
+        while action not in self.action_space:
+            display_dialog_history(mcb.dialog_hx, self.tokenizer)
             print()
             print(" actions: ")
-            for k,v in enumerate(action_space): print(k,v)
+            for k,v in enumerate(self.action_space): print(k,v)
             try:
                 int_act = int(input(" input [0-10]: " ))
-                action = action_space[int_act]
+                action = self.action_space[int_act]
             except:
                 action = None            
         scb.action = action
@@ -587,7 +627,7 @@ class ActiveGym(Gym):
         mcb.dialog_hx.append(mcb.msg)
         # check if need revision
         print(); print('-'*50)
-        display_dialog_history(self.user.dialog_history)
+        display_dialog_history(self.user.dialog_history, self.tokenizer)
         print('-'*12, ' iter %d, turn %d '%(self.iter, scb.turn), '-'*12 )
         print("action: ", scb.action)
         decision = input(" continue? [y/n] ")
@@ -606,7 +646,8 @@ class ActiveGym(Gym):
             while len(y[0]) < 2:
                 y = self.tokenizer.encode(input("  >> user: ") + self.tokenizer.eos_token, return_tensors='pt')
             if scb.turn ==0:
-                y = torch.cat( (torch.tensor([start_tok]).unsqueeze(0), y), -1)
+                start_tok = self.tokenizer.encode('<|start|>', return_tensors='pt')
+                y = torch.cat( (start_tok, y), -1)
             # extend active learning data and prepare active learning batch
             self.data['X'].extend( mcb.x.tolist() ); self.data['y'].extend( y.tolist())
             mcb.batch = (mcb.x,y)
@@ -630,7 +671,7 @@ class ActiveGym(Gym):
 
         """
         if not scb.done:
-            display_dialog_history(self.agent.dialog_history)
+            display_dialog_history(self.agent.dialog_history, self.tokenizer)
             print('-'* 12, ' iter %d, turn %d ' %(self.iter, scb.turn), '-' * 12)
             print(" personas: ")
             for p in scb.personas: print(p)
@@ -657,7 +698,7 @@ class ActiveGym(Gym):
             - if user corrections, update model if training mode.
         """
         if scb.record:
-            self.data['dialog_hx'].append(to_tokens(mcb.dialog_hx))
+            self.data['dialog_hx'].append(to_tokens(mcb.dialog_hx, self.tokenizer))
             self.data['actions'].append(scb.actions)
         elif self.train_model:
             self.learner.fit_on_active_batch(mcb.batch)
@@ -675,6 +716,31 @@ class ActiveGym(Gym):
             self._sim_convo(persona, None, None)
             if self.iter > max_num_convos:
                 break
+            
+    def save_data(self, save_dir):
+        """
+        Save conversational episode data to file.
+
+        Parameters
+        ----------
+        save_dir : os.path or string
+            Directory to save self.data to. Saves as 2 .csv files.
+                - active learning data (input context, target tokens)
+                - imitation learning data (dialog history, actions)
+
+        Returns
+        -------
+        None.
+        
+        """
+        al_data = self.data['X'], self.data['y']
+        il_data = self.data['dialog_hx'], self.data['actions']
+        if al_data:
+            al_df = pd.DataFrame(al_data, columns=['X', 'y'])
+            al_df.to_csv(os.path.join(save_dir, 'active_learning_data.csv'), index=False)
+        if il_data:
+            il_df = pd.DataFrame(il_data, columns=['dialog_hx', 'actions'])
+            il_df.to_csv(os.path.join(save_dir, 'imitation_learning_data.csv'), index=False)                    
 
 # RL environments
 class RLGym(Gym):
@@ -735,18 +801,20 @@ class RLGym(Gym):
                 List of strings corresponding to each turn response.
             - actions: list of int
                 List of integers corresponding to index of the sampled action at each turn.
+            - rewards: list of floats
+                List of floats corresponding to the reward received at each turn.
             - personas: list of strings
                 List of strings corresponding to the person facts of the agent (second) person.
     
     memory_buffer : List of tuple
         Current dataset of batch tuples of the form 
-            (states, contexts, actions, next_states, next_contexts, next_acts, rewards). 
+            (states, actions, next_states, next_acts, rewards). 
             
-        (state, context, action) -> (next_state, next_context), reward is observed at each transition as a part of the Markov Decision Process. 
+        (state, action) -> (next_state, next_action), reward is observed at each transition as a part of the Markov Decision Process. 
             
     """
     def __init__(self, model, tokenizer, policy, env, reward_obj, 
-                 max_buffer_size = 1000,
+                 max_buffer_size=1000,
                  length=8, top_k=10, top_p = .92, max_length=1024):        
         super().__init__(model=model, tokenizer=tokenizer, user=None, interactive=False, 
                          reset_persona_func=get_sequence_personas,
@@ -755,22 +823,24 @@ class RLGym(Gym):
         self.policy = policy
         self.R = reward_obj
         self.Env = env
-        self.data = {'dialog_hx':[], 'actions': [], 'personas': []}
+        self.data = {'dialog_hx':[], 'actions': [], 'personas': [], 'rewards': []}
         self.memory_buffer, self.max_buffer_size = [], max_buffer_size
     
     def _reset_agents(self, persona_input, agent_personas=None, user_personas=None):
         """
         Resets Agent objects for user (no input personas, uses action prefixes) and agent (randomly sampled persona, uses persona prefixes).
         """
-        self.user = Agent([], top_k=self.top_k, top_p=self.top_p, max_length=self.max_length)
-        self.agent = Agent(persona_input, top_k=self.top_k,
+        self.user = Agent(model=self.model, tokenizer=self.tokenizer, 
+                          persona=[], top_k=self.top_k, top_p=self.top_p, max_length=self.max_length)
+        self.agent = Agent(model=self.model, tokenizer=self.tokenizer, 
+                           persona=persona_input, top_k=self.top_k,
                                top_p=self.top_p, max_length=self.max_length)
     
     def _on_convo_begin(self, scb, mcb):
         """
         On conversation begin:
-            Initializes the state and context objects for tracking using a StateCb callback (scb). 
-            The default state and context objects are torch.tensor feature vectors. 
+            Initializes the state for tracking using a StateCb callback (scb). 
+            The default state objects are torch.Tensor feature vectors. 
         """
         scb = self.Env.reset(scb)
         scb.personas = self.agent.p2
@@ -779,8 +849,8 @@ class RLGym(Gym):
     def _on_user_begin(self, scb, mcb):
         """
         On user begin:
-            - Obtains a state and context representation from current dialog history.
-            - Policy maps state and context -> action (sampled from action space, no gradient).
+            - Obtains a state representation from current dialog history.
+            - Policy maps state -> action (sampled from action space, no gradient).
 
         Parameters
         ----------
@@ -798,7 +868,7 @@ class RLGym(Gym):
         inp = self.Env.get_policy_inp(scb)
         int_act = self.policy.act(inp, scb.turn)
         # update action
-        scb.action = action_space[int_act]
+        scb.action = self.policy.action_space[int_act]
         scb.actions.append(int_act)
         scb.act = True
         self.user.p1 = [scb.action]
@@ -821,7 +891,7 @@ class RLGym(Gym):
         """
         On agent end:
             - Track dialog history and update turn counts.
-            - Get (state, context) -> (next_state, next_context) transition from environment. 
+            - Get state, action -> next_state transition from environment. 
             - Get reward for dialog trajectory up to current turn.
         """
         mcb.dialog_hx.append(mcb.msg)
@@ -856,28 +926,30 @@ class RLGym(Gym):
         # display
         print('actions: ')
         print()
-        for p in scb.actions: print(action_space[p])
+        for p in scb.actions: print(self.policy.action_space[p])
         print('-'*10)
         print('p2: ')
         print()
         for p in scb.personas: print(p)
         print('-'*10)
         print()
-        display_dialog_history(mcb.dialog_hx)
+        display_dialog_history(mcb.dialog_hx, self.tokenizer)
         # evaluate dialog and log
         self.R.score_trajectory(scb, mcb)
-        self.data['dialog_hx'].append(to_tokens(mcb.dialog_hx))
+        self.data['dialog_hx'].append(to_tokens(mcb.dialog_hx, self.tokenizer))
         self.data['actions'].append(scb.actions)
         self.data['personas'].append(self.agent.p2)
+        self.data['rewards'].append(scb.rewards)
         # update memory buffer
         next_states = scb.states[1:]; states = scb.states[:-1]
-        next_contexts = scb.contexts[1:]; contexts = scb.contexts[:-1]
         next_acts = scb.actions[1:] + [0]
-        batch = list(zip(states, contexts, scb.actions, next_states, next_contexts, next_acts, scb.rewards))
+        dones =  [False]*(len(scb.rewards)-1) + [True]
+        batch = list(zip(states, scb.actions, next_states, next_acts, 
+                         scb.rewards, dones))
         self._update_memory(batch)
         del scb, mcb
     
-    def sim_convos(self, num_convos=9999, training=True):
+    def sim_convos(self, num_epochs=1, num_convos=9999, training=True):
         """
         Generate dialog trajectories. 
             - If training mode, update policy parameters at end of episode using gradient descent over memory buffer samples. 
@@ -895,7 +967,7 @@ class RLGym(Gym):
         print()
         if training:
             max_num_convos = min(len(train_personas) * opts.num_epochs, num_convos)
-            for epoch in range(opts.num_epochs):
+            for epoch in range(num_epochs):
                 for self.iter, persona in enumerate(self.reset_persona_func(train_personas)):
                     print("="*20, "epoch %d, iter %d, training" %(epoch+1, self.iter), "="*20)
                     self._sim_convo(persona, None, None)

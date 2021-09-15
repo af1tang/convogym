@@ -11,16 +11,26 @@ from torch.utils.data import DataLoader
 
 from torch.optim import AdamW
 from transformers import get_linear_schedule_with_warmup
-from _tokenizer import act_tok, start_tok, p1_tok, p2_tok
-from utils._device import to_device
-from utils._reshape import flatten
-from utils._optim_helpers import fit_on_batch
-from utils._visualization import plot_losses
+from convogym.utils._device import to_device
+from convogym.utils._reshape import flatten
+from convogym.utils._optim_helpers import fit_on_batch
+from convogym.utils._visualization import plot_losses
 
-def _get_grouped_params(model):
+def _get_grouped_params(model, act_tok=50262, start_tok=50259,
+                                p1_tok=50260, p2_tok=50261):
+    """
+    Group learn rates by token groups:
+        - new special tokens are "fast" 
+        - regular tokens are frozen ("freeze", very slow rate)
+        - positional weights are "slow"
+        - everything else is "normal" 
+        
+    Note: this only applies if using af1tang/personaGPT model card.
+    
+    """
     with torch.no_grad():
-        fast_group = flatten([[p[act_tok], p[start_tok], p[p1_tok], p[p2_tok]] for n,p in model.named_parameters() if n == 'transformer.wte.weight']) #['transformer.wte.weight']
-        freeze_group = [p[:start_tok] for n,p in model.named_parameters() if n == 'transformer.wte.weight']#['transformer.wte.weight']
+        fast_group = flatten([[p[act_tok], p[start_tok], p[p1_tok], p[p2_tok]] for n,p in model.named_parameters() if n == 'transformer.wte.weight']) 
+        freeze_group = [p[:start_tok] for n,p in model.named_parameters() if n == 'transformer.wte.weight']
         slow_group = [p for n,p in model.named_parameters() if n == 'transformer.wpe.weight']
         normal_group = [p for n,p in model.named_parameters() if n not in ('transformer.wte.weight',
                                                                            'transformer.wpe.weight')]
@@ -77,10 +87,11 @@ class Learner(nn.Module):
         Stores training_data as DataLoader object to generate batch samples.
 
     """
-    def __init__(self, model, training_data, lr=5e-5, use_param_groups=True,
+    def __init__(self, model, training_data, lr=5e-5, use_param_groups=False,
                  schedule_func=None,
                  gradient_accumulation_steps=8, max_grad_norm=1.0,
                  optim_func=None, total_iters=20000):
+        super(Learner, self).__init__()
         if use_param_groups:
             optimizer_grouped_parameters = _get_grouped_params(model)
         else:
@@ -113,6 +124,13 @@ class Learner(nn.Module):
 
         """
         self.data_iter = iter(self.dataloader)
+        
+    def forward(self, *args, **kwargs):
+        """
+        Calls self.model(*args, **kwargs), this part is the same as the original model.
+        """
+        return self.model(*args, **kwargs)
+    
         
     def fit_on_active_batch(self, active_batch):
         """
@@ -181,7 +199,8 @@ class Learner(nn.Module):
         stats = {}        
         tr_loss, logging_loss = 0.0, 0.0
         # model to training mode
-        self.model.zero_grad(); self.model.train()
+        self.model.zero_grad() 
+        self.model.train()
         start_time = time.time()
         
         t_total = len(self.dataloader) // self.gradient_accumulation_steps * num_train_epochs
@@ -219,7 +238,7 @@ class Learner(nn.Module):
                         plot_losses(stats, title='pretrain_loss' )
                         plot_losses(stats, title='pretrain_lr')
                         print("Done.")
-                        
+        self.model.eval()
         return stats
         
     def save(self, save_path):
