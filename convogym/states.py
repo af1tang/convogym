@@ -112,7 +112,7 @@ class StateEstimator(BaseStateEstimator):
         The corresponding tokenizer for the transformer model. 
         The default tokenizer is af1tang/personaGPT.
             
-    checkpoint_path : string or os.path, optional
+    from_pretrained : string or os.path, optional
         Save and loading path to the embedder network state_dict (weights).
     
     inp_size : int, optional
@@ -138,7 +138,7 @@ class StateEstimator(BaseStateEstimator):
     so long as the persona facts are found in self.p2v. 
     """
     def __init__(self, model, tokenizer, 
-                 checkpoint_path=os.path.join(opts.example_path, 'embedder.pt'),
+                 from_pretrained=os.path.join(opts.example_path, 'embedder.pt'),
                  inp_size=1024, hidden_size=1024, dropout=.2):
         super().__init__(model=model, tokenizer=tokenizer)
         # network layers
@@ -148,8 +148,11 @@ class StateEstimator(BaseStateEstimator):
                 nn.Dropout(dropout),
                 nn.Linear(hidden_size, hidden_size)
             )     
-        self.checkpoint_path = checkpoint_path
-        self.load_params(self.checkpoint_path)
+        self.checkpoint_path = from_pretrained
+        if from_pretrained:
+            self.load_params()
+        else:
+            warnings.warn("This state estimator has NOT been trained yet.")
         
     def forward(self, dialog_history, reduction = "mean"):
         """

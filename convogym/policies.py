@@ -47,6 +47,8 @@ class Policy(nn.Module):
     action_space : List of string, optional
         List of strings of action space. The default is action_space.
         
+    from_pretrained : os.path or string, optional
+        A checkpoint path to save or load the parameters of the policy.
         
     EPS_START : float, optional
         Float (0, 1.0) for the initial epsilon parameter in epsilon-greedy sampling. The default is .5.
@@ -90,7 +92,7 @@ class Policy(nn.Module):
 
     """    
     def __init__(self, policy=default_policy,
-                 checkpoint_path=os.path.join(opts.example_path, 'policy.pt'),
+                 from_pretrained=None,
                  lr=1e-4, action_space=action_space,
                 EPS_START=.5, EPS_END=.05, EPS_DECAY=int(2e4)):
         super(Policy, self).__init__()
@@ -102,8 +104,11 @@ class Policy(nn.Module):
         self.reset_stats()
         self.action_space = action_space
         # load params, warn if not trained
-        self.checkpoint_path = checkpoint_path
-        self.load_params()
+        self.checkpoint_path = from_pretrained
+        if from_pretrained:
+            self.load_params()
+        else:
+            warnings.warn("This policy has NOT been trained yet.")
         
     def reset_stats(self):
         """
