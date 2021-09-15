@@ -9,7 +9,7 @@ from convogym.gyms import Gym
 # default persona model is af1tang/personaGPT from huggingface
 from convogym.decoders import model, tokenizer
 # get persona function, in this case randomly samples from personachat dataset
-from prefixes import get_random_persona 
+from convogym.prefixes import get_random_persona 
 
 gym = Gym(model = model, tokenizer=tokenizer, interactive = False,
           reset_persona_func=get_random_persona, length=10)

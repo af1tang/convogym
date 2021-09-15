@@ -10,6 +10,7 @@ import setuptools
 
 setuptools.setup( 
     name = "convogym",
+    version = "0.1.0",
     url = "https://github.com/af1tang/convogym",
     author = "Fengyi (Andy) Tang",
     author_email = "af1tang2@gmail.com",
