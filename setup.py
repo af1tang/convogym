@@ -6,11 +6,11 @@ Created on Wed Sep  8 19:06:05 2021
 @author: af1tang
 """
 
-import setuptools
+from setuptools import setup, find_packages
 
-setuptools.setup( 
+setup( 
     name = "convogym",
-    version = "0.1.0",
+    version = "0.1.2",
     url = "https://github.com/af1tang/convogym",
     author = "Fengyi (Andy) Tang",
     author_email = "af1tang2@gmail.com",
@@ -19,10 +19,8 @@ setuptools.setup(
     active learning and self-play.
     """,
     long_description = open('README.rst').read(),
-    package = ['convogym', 'convogym.utils', 'convogym.test', 'examples'],
-    package_data = {'personachat': ['data/personachat.csv'],
-                    'train_personas': ['data/train_personas.csv'],
-                    'test_personas': ['data/test_personas.csv']},
+    packages = ['convogym', 'convogym.utils', 'convogym.test'],
+    package_data = {'convogym': ['data/personachat.csv','data/train_personas.csv', 'data/test_personas.csv']},
     install_require = [
         "pytorch==1.4.0",
         "numpy>=1.20.2",
