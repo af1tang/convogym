@@ -52,10 +52,8 @@ There are 2 ways to install the current package.
 The easiest way is to use `pip` installation:
 
 ```
-pip install -U convogym
+pip install convogym
 ```
-
-_(09.12.21) Under construction_
 
 To build from source, use Git to clone the latest repo:
 
