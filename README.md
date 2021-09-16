@@ -64,6 +64,11 @@ git clone git://github.com/af1tang/convogym.git
 cd convogym
 ```
 
+Once in the repo, pip install in developer mode locally.
+```
+pip install -e ./
+```
+
 As of September 2021, convogym is NOT supported on Apple Silicon M1 hardware. 
 
 ## Getting Started

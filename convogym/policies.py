@@ -214,10 +214,10 @@ class DQNPolicy(Policy):
     
     """
     def __init__(self, policy=default_policy,
-                 checkpoint_path=os.path.join(opts.example_path, 'policy.pt'),
+                 from_pretrained=None,
                  lr=1e-4, action_space = action_space, gamma=.95,
                 EPS_START=.5, EPS_END=.05, EPS_DECAY=int(2e4), t_total=int(2e4)):
-        super().__init__(policy=policy, checkpoint_path=checkpoint_path,
+        super().__init__(policy=policy, from_pretrained=from_pretrained,
                          lr=lr, action_space=action_space, 
                          EPS_START=EPS_START, EPS_END=EPS_END, EPS_DECAY=EPS_DECAY)
         # optim and sched

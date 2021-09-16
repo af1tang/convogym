@@ -138,7 +138,7 @@ class StateEstimator(BaseStateEstimator):
     so long as the persona facts are found in self.p2v. 
     """
     def __init__(self, model, tokenizer, 
-                 from_pretrained=os.path.join(opts.example_path, 'embedder.pt'),
+                 from_pretrained=None,
                  inp_size=1024, hidden_size=1024, dropout=.2):
         super().__init__(model=model, tokenizer=tokenizer)
         # network layers
@@ -147,7 +147,8 @@ class StateEstimator(BaseStateEstimator):
                 nn.Tanh(),
                 nn.Dropout(dropout),
                 nn.Linear(hidden_size, hidden_size)
-            )     
+            ).to(device)
+        
         self.checkpoint_path = from_pretrained
         if from_pretrained:
             self.load_params()
@@ -176,6 +177,7 @@ class StateEstimator(BaseStateEstimator):
             Outputs an embedding vector for the entire dialog history. Applies embedding network on hidden state of the dialog history.
 
         """
+        self.embedder.eval()
         return self.embedder(self._get_hidden_state(dialog_history, reduction))
 
     def _get_persona_embeddings(self, persona_facts, reduction="mean"):
@@ -270,13 +272,13 @@ class RankingStateEstimator(StateEstimator):
         
     """
     def __init__(self, model, tokenizer, 
-                 checkpoint_path=os.path.join(opts.example_path, 'embedder.pt'),
+                 from_pretrained=None,
                  inp_size=1024, hidden_size=1024, dropout=.2, k=20):
         super().__init__(model=model, tokenizer=tokenizer, 
-                         checkpoint_path=checkpoint_path,
+                         from_pretrained=from_pretrained,
                          inp_size=inp_size, hidden_size=hidden_size,
                          dropout=dropout)
-        self.criterion = RankingLoss(self, k=k)
+        self.criterion = RankingLoss(state_estimator=self, k=k)
         
     def fit(self, train_data, candidates,
                 epochs=1, lr=1e-3, bs=32, 
@@ -319,7 +321,7 @@ class RankingStateEstimator(StateEstimator):
 
         """
         print()
-        print("Training identifier ... ")
+        print("Training the state estimator ... ")
         print()
         optimizer = torch.optim.Adam(self.embedder.parameters(), lr=lr)
         # training
@@ -332,12 +334,11 @@ class RankingStateEstimator(StateEstimator):
             for minibatch in chunker(train_data, bs):
                 # batching
                 convos, p1, p2 = zip(*minibatch)
-                convos, p1, p2 = map(to_var, (convos, p1, p2))
                 # forward
-                x1 = self.forward([history[::2] for history in convos])
-                x2 = self.forward([history[1::2] for history in convos])
-                loss1 = self.criterion(inp=x1, positives=p1, candidates=candidates)
-                loss2= self.criterion(inp=x2, positives=p2, candidates=candidates)
+                x1 = torch.stack([self.forward(convo[::2]) for convo in convos], dim=0)
+                x2 = torch.stack([self.forward(convo[1::2]) for convo in convos], dim=0)
+                loss1 = self.criterion(states=x1, positives=p1, candidates=candidates)
+                loss2= self.criterion(states=x2, positives=p2, candidates=candidates)
                 loss = loss1+loss2
                 # backward
                 loss.backward()
@@ -385,16 +386,16 @@ class RankingStateEstimator(StateEstimator):
         """
         # eval
         print("-"*50)
-        print("Evaluating identifier ... ")
+        print("Evaluating the state estimator ... ")
         eval_stats = {'prec@1':[], 'prec@5':[], 'rec@5':[], 'rec@10':[]}
         self.embedder.eval()
         for minibatch in chunker(test_data, bs):
             # batching
             convos, p1, p2 = zip(*minibatch)
-            convos, p1, p2 = map(to_var, (convos, p1, p2))
             with torch.no_grad():
-                x1 = self.forward([history[::2] for history in convos])
-                x2 = self.forward([history[1::2] for history in convos])
+                # forward
+                x1 = torch.stack([self.forward(convo[::2]) for convo in convos], dim=0)
+                x2 = torch.stack([self.forward(convo[1::2]) for convo in convos], dim=0)
             for xx,yy in [(x1,p1), (x2,p2)]:
                 prec1, prec5, rec5, rec10 = self.criterion.score(inp=xx, positive=yy, candidates=candidates)
                 eval_stats['prec@1'].extend(prec1)

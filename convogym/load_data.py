@@ -175,6 +175,66 @@ def load_rl_convos(tokenizer, state_estimator, data_path):
     print("done.")
     return data
 
+def load_persona_train(path=os.path.join(opts.example_path,'train_decoder_data'),
+                       data_path=None):
+    """
+    Loads persona training set batches for fine-tuning (used during active learning).
+    
+    Parameters
+    ----------
+    path : os.path or string, optional
+        Path to pickled file if exists. The default is os.path.join(opts.example_path,'train_decoder_data').
+
+    data_path : os.path or string, optional
+        Path to persona dataset. The default is convogym/data/personachat.csv.
+
+    Returns
+    -------
+    train_data : List of tuples
+        List of training batches.
+    """
+    try:
+        with open(path, 'rb') as f:
+            train_data = pickle.load(f)
+    except Exception as e:
+        print(e)
+        print("Building PersonaChat dataset from scratch ... ")
+        from convogym.decoders import model, tokenizer
+        train_data, _ = prepare_personachat_dataset(model, tokenizer, 
+                                                    data_path=data_path)
+    return train_data
+
+def load_state_estim_train(path=os.path.join(opts.example_path,'train_state_estim_data'),
+                          data_path=None):
+    """
+    Loads PersonaChat and formats dialogs into state estimation format for training.    
+
+    Parameters
+    ----------
+    path : os.path or string, optional
+        Path to pickled file if exists. The default is os.path.join(opts.example_path,'train_state_estim_data').
+
+    data_path : os.path or string, optional
+        Path to persona dataset. The default is convogym/data/personachat.csv.
+
+    Returns
+    -------
+    state_estim_data : List of tuples
+        List of training batches.
+
+    """
+    try:
+        with open(path, 'rb') as f:
+            train_data = pickle.load(f)
+    except Exception as e:
+        print(e)
+        print("Building state estimation data from PersonaChat ... ")
+        from convogym.decoders import model, tokenizer
+        train_data, _ = prepare_state_estim_dataset(model, tokenizer, 
+                                                          data_path=None,
+                                                          return_data=True)
+    return train_data
+
 # methods for building PersonaChat dataset 
 def _load_personachat(tokenizer, data_path):
     """
@@ -416,7 +476,8 @@ def prepare_personachat_dataset(model, tokenizer, data_path=None,
     return tr_batches, te_batches
 
 def prepare_state_estim_dataset(model, tokenizer, data_path=None,
-                               save_dir=opts.example_path):
+                               save_dir=opts.example_path,
+                               return_data=False):
     """
     Formats personachat dataframe into an array of training samples for unsupervised learning. 
     
@@ -486,5 +547,8 @@ def prepare_state_estim_dataset(model, tokenizer, data_path=None,
         pickle.dump(tr_data, f)
     with open(os.path.join(save_dir, 'test_state_estim_data'), 'wb') as f:
         pickle.dump(te_data, f)
-    return persona_facts
+    if not return_data:
+        return persona_facts
+    else:
+        return tr_data, te_data
     

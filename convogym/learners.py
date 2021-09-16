@@ -209,7 +209,7 @@ class Learner(nn.Module):
             for step in range(len(self.dataloader)):
                 ### step ###
                 batch = self.data_iter.next()
-                loss = fit_on_batch(batch); del batch
+                loss = fit_on_batch(self.model, batch, self.gradient_accumulation_steps); del batch
                 # logging (new data only)
                 tr_loss += loss.item()
                 
@@ -233,7 +233,7 @@ class Learner(nn.Module):
                                 str(stats[self.steps]['pretrain_lr']), elapsed_time))
                         start_time = time.time()
                         
-                    if (self.step + 1) % save_steps==0:
+                    if (self.steps + 1) % save_steps==0:
                         print("Plotting training loss and lr ... ")
                         plot_losses(stats, title='pretrain_loss' )
                         plot_losses(stats, title='pretrain_lr')

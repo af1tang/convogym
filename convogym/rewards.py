@@ -43,31 +43,73 @@ class RankingLoss(nn.Module):
         self.ranking_loss = nn.TripletMarginLoss(margin=margin, swap=swap, reduction=reduction)
         self.state_estimator = state_estimator
         self.k = k
-                
-    def forward(self, inp, positives, candidates):
-        '''inp: (bs x dim) e.g., 1 x 1024
-        positives: (# personas x dim) e.g., 5 x 1024
-        candidate_facts: List of strings'''
-        # generate candidates using negative sampling
-        positive_samples, negative_samples = self._generate_candidates(candidates, positives)
-        # calculate ranking loss over candidates
-        num_pos, num_neg = positive_samples.size(0), negative_samples.size(0)
-        total_loss = 0.
-        count = 0
-        for i in range(0, num_neg, num_pos):
-            if positive_samples.size(0) == negative_samples[i:i+num_pos].size(0):
-                total_loss = total_loss + self.ranking_loss(inp, positive_samples, negative_samples[i:i+num_pos])
-                count +=1
-        return total_loss
     
-    def score(self, inp, positives, candidates):
+    def _calculate_loss(self, inp, pos_cands, neg_cands):
         """
-        Calculates the dialog history embeddings and outputs the triplet loss on batch. 
+        Calculates the triplet loss for a single sample.
 
         Parameters
         ----------
         inp : torch.Tensor
-            Embedding of an input dialog trajectory. 
+            A single state embedding.
+            
+        pos_cands : torch.Tensor
+            The set of persona embeddings that co-occur with the dialog.
+            
+        neg_cands : torch.Tensor
+            A set of persona embeddings negatively sampled from a list of candidates.
+
+        Returns
+        -------
+        total_loss : torch.Tensor
+            Loss on single sample over candidate comparisons.
+
+        """
+        num_pos, num_neg = pos_cands.size(0), neg_cands.size(0)
+        total_loss = 0.
+        count = 0
+        for i in range(0, num_neg, num_pos):
+            if pos_cands.size(0) == neg_cands[i:i+num_pos].size(0):
+                total_loss = total_loss + self.ranking_loss(inp, pos_cands, neg_cands[i:i+num_pos])
+                count +=1
+        return total_loss
+        
+    def forward(self, states, positives, candidates):
+        """
+        Calculates the dialog history embeddings and outputs the triplet loss on batch. 
+        
+        Parameters
+        ----------
+        states : torch.Tensor
+            Embeddings of input dialog trajectories. 
+            
+        positives : List of list strings
+            List of person 2 persona facts corresponding to each conversation in the batch.    
+            
+        candidates : List of strings
+            List of supporting set of persona facts to generate candidates from.
+            
+        Returns
+        -------
+        loss : float
+            Triplet loss on batch.
+
+        """
+        # generate candidates using negative sampling
+        pos_targets, neg_targets = self._generate_candidates(candidates, positives)
+        # calculate ranking loss over candidates
+        loss = sum([self._calculate_loss(states[i].unsqueeze(0), pos_targets[i], neg_targets[i])
+                                for i in range(len(states))])
+        return loss
+    
+    def score(self, states, positives, candidates):
+        """
+        Calculates precision and recall metrics based on embeddings of dialog trajectories.
+        
+        Parameters
+        ----------
+        states : torch.Tensor
+            Embeddings of input dialog trajectories. 
             
         positives : List of list strings
             List of person 2 persona facts corresponding to each conversation in the batch.    
@@ -99,22 +141,22 @@ class RankingLoss(nn.Module):
         >>> persona = ["i play the piano.", "i'm a little league all-star."]
         >>> state_estimator = StateEstimator(model)
         >>> ranking_loss = RankingLoss()
-        >>> inp = state_estimator(dialog_history) # outputs a (1 x 1024) tensor
-        >>> prec1, prec5, rec5, rec10 = ranking_loss.score(inp, persona) 
+        >>> states = state_estimator(dialog_history) # outputs a (1 x 1024) tensor
+        >>> prec1, prec5, rec5, rec10 = ranking_loss.score(states, [persona]) 
         >>> print("precision@5: %.2f, recall@5: %.2f" %(prec5, rec5))
         precision@5: 0.40, recall@5: 1.00
         
         """
         pos_targets, neg_targets = self._generate_candidates(candidates, positives)
         # calculate precision@k and recall@k metrics
-        prec1 = [self._score_triplet(inp[i].unsqueeze(0), pos_targets[i], neg_targets[i], at_k=1)
-                 for i in range(len(inp))]
-        prec5 = [self._score_triplet(inp[i].unsqueeze(0), pos_targets[i], neg_targets[i], at_k=5)
-                 for i in range(len(inp))]
-        rec5 = [self._score_triplet(inp[i].unsqueeze(0), pos_targets[i], 
-                neg_targets[i], at_k=5, use_recall=True) for i in range(len(inp))]
-        rec10 = [self._score_triplet(inp[i].unsqueeze(0), pos_targets[i], 
-                neg_targets[i], at_k=10, use_recall=True) for i in range(len(inp))]
+        prec1 = [self._score_triplet(states[i].unsqueeze(0), pos_targets[i], neg_targets[i], at_k=1)
+                 for i in range(len(states))]
+        prec5 = [self._score_triplet(states[i].unsqueeze(0), pos_targets[i], neg_targets[i], at_k=5)
+                 for i in range(len(states))]
+        rec5 = [self._score_triplet(states[i].unsqueeze(0), pos_targets[i], 
+                neg_targets[i], at_k=5, use_recall=True) for i in range(len(states))]
+        rec10 = [self._score_triplet(states[i].unsqueeze(0), pos_targets[i], 
+                neg_targets[i], at_k=10, use_recall=True) for i in range(len(states))]
 
         return prec1, prec5, rec5, rec10
     
@@ -123,9 +165,9 @@ class RankingLoss(nn.Module):
         """
         Generates negative samples for triplet rankings.
         """
-        negatives = random.sample( set(candidates) - set(positives), self.k)
-        pos_samples = self.state_estimator._get_persona_embeddings(positives)
-        neg_samples = self.state_estimator._get_persona_embeddings(negatives)
+        negatives = [random.sample( set(candidates) - set(pos_set), self.k) for pos_set in positives]
+        pos_samples = [self.state_estimator._get_persona_embeddings(p) for p in positives]
+        neg_samples = [self.state_estimator._get_persona_embeddings(n) for n in negatives]
         return pos_samples, neg_samples
     
     def _score_triplet(self, x, pos,neg, at_k, use_recall=False):
@@ -267,8 +309,8 @@ class RankingReward(Reward):
             List of reward for each turn.
     
         """
-        loss = self.criterion(inp=scb.state.view(1,-1), 
-                              positives=scb.personas, 
+        loss = self.criterion(states=scb.state.view(1,-1), 
+                              positives=[scb.personas], 
                               candidates=self.candidates)
         scb.reward = - loss.item()
         scb.rewards.append(scb.reward)
@@ -298,8 +340,8 @@ class RankingReward(Reward):
             Average recall@5 score, defined as # hits in top 10 guesses / # positives. Measures diversity of guesses.
     
         """
-        prec1, prec5, rec5, rec10 = self.criterion.score(inp=scb.state.view(1,-1), 
-                                                        positives=scb.personas, 
+        prec1, prec5, rec5, rec10 = self.criterion.score(states=scb.state.view(1,-1), 
+                                                        positives=[scb.personas], 
                                                         candidates=self.candidates)
         # log data
         self.metrics['prec1s'].extend(prec1)

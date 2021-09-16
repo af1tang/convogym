@@ -521,7 +521,7 @@ class ActiveGym(Gym):
                  train_model=False, action_space=action_space,
                  length=8, top_k=10, top_p = .92, max_length=1024, 
                  # learner wrapper parameters
-                 use_param_groups=False, lr=opts.lr,
+                 use_param_groups=False, lr=1e-3,
                  schedule_func=None, gradient_accumulation_steps=8, 
                  optim_func=None, total_iters=20000, max_grad_norm=1.0):
         
@@ -704,14 +704,14 @@ class ActiveGym(Gym):
             self.learner.fit_on_active_batch(mcb.batch)
         del scb, mcb
         
-    def sim_convos(self, num_convos=9999):
+    def sim_convos(self, num_epochs=3, num_convos=9999):
         """
         Generate dialog trajectories with 
             max number of episodes = min( size of persona set * epochs, num_convos). 
         """
         print("Conducting conversations ...")
         print()
-        max_num_convos = min(len(train_personas) * opts.num_epochs, num_convos)
+        max_num_convos = min(len(train_personas) * num_epochs, num_convos)
         for self.iter, persona in enumerate(self.reset_persona_func(train_personas)):
             self._sim_convo(persona, None, None)
             if self.iter > max_num_convos:
@@ -966,7 +966,7 @@ class RLGym(Gym):
         print("Conducting conversations ...")
         print()
         if training:
-            max_num_convos = min(len(train_personas) * opts.num_epochs, num_convos)
+            max_num_convos = min(len(train_personas) * num_epochs, num_convos)
             for epoch in range(num_epochs):
                 for self.iter, persona in enumerate(self.reset_persona_func(train_personas)):
                     print("="*20, "epoch %d, iter %d, training" %(epoch+1, self.iter), "="*20)

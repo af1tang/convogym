@@ -41,7 +41,7 @@ def load_persona_facts(save_path=None):
     Returns
     -------
     persona_facts : List of strings
-        DESCRIPTION.
+        List of unique persona facts from save file.
 
     """
     if save_path:

@@ -15,11 +15,14 @@ setuptools.setup(
     author = "Fengyi (Andy) Tang",
     author_email = "af1tang2@gmail.com",
     description = """
-    A gym environment to train open-domain conversational agents through 
+    A gym environment to train conversational agents for custom tasks through 
     active learning and self-play.
     """,
-    long_description = open('README.md').read(),
-    package = setuptools.find_packages(),
+    long_description = open('README.rst').read(),
+    package = ['convogym', 'convogym.utils', 'convogym.test', 'examples'],
+    package_data = {'personachat': ['data/personachat.csv'],
+                    'train_personas': ['data/train_personas.csv'],
+                    'test_personas': ['data/test_personas.csv']},
     install_require = [
         "pytorch==1.4.0",
         "numpy>=1.20.2",
