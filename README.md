@@ -52,7 +52,8 @@ There are 2 ways to install the current package.
 The easiest way is to use `pip` installation:
 
 ```
-pip install convogym
+pip install convogym   
+pip install python-dotenv
 ```
 
 To build from source, use Git to clone the latest repo:
