@@ -28,6 +28,7 @@ setup(
         "pandas>=1.2.4",
         "transformers==4.10.0",
         "dotenv",
+        "python-dotenv",
         "tqdm",
     ],
     classifiers = [

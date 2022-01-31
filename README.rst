@@ -56,6 +56,7 @@ convogym requires the following dependencies:
 * scipy>=1.6.2
 * pandas>=1.2.4
 * transformers==4.10.0
+* python-dotenv
 * dotenv
 * tqdm
 
