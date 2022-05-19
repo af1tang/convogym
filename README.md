@@ -182,7 +182,7 @@ Contributors at all levels of experience are welcomed.
 
 * Please also open an issue page when making a feature request.
 
-* Feel free to push a PR and I'll review it. Unlike my documentation practices, I typically do not procrastinate with code review and issues. 
+* Feel free to submit a PR and I'll review it. Unlike my documentation practices, I typically do not procrastinate with code review and issues. 
 
 
 A more detailed documentation page to come.
